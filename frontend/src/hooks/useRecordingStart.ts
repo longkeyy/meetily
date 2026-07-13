@@ -8,6 +8,7 @@ import { recordingService } from '@/services/recordingService';
 import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { toast } from 'sonner';
+import { ParakeetModelInfo } from '@/lib/parakeet';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: () => Promise<void>;
@@ -34,7 +35,7 @@ export function useRecordingStart(
 
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
-  const { selectedDevices } = useConfig();
+  const { selectedDevices, transcriptModelConfig } = useConfig();
   const { setStatus } = useRecordingState();
 
   // Generate meeting title with timestamp
@@ -51,33 +52,37 @@ export function useRecordingStart(
 
   // Check if Parakeet transcription model is ready
   const checkParakeetReady = useCallback(async (): Promise<boolean> => {
+    if (transcriptModelConfig.provider !== 'parakeet') return true;
+
     try {
       await invoke('parakeet_init');
-      const hasModels = await invoke<boolean>('parakeet_has_available_models');
-      return hasModels;
+      const models = await invoke<ParakeetModelInfo[]>('parakeet_get_available_models');
+      return models.some(
+        model => model.name === transcriptModelConfig.model && model.status === 'Available'
+      );
     } catch (error) {
       console.error('Failed to check Parakeet status:', error);
       return false;
     }
-  }, []);
+  }, [transcriptModelConfig.provider, transcriptModelConfig.model]);
 
-  // Check if any model is currently downloading
+  // Check whether the selected Parakeet model is currently downloading.
   const checkIfModelDownloading = useCallback(async (): Promise<boolean> => {
+    if (transcriptModelConfig.provider !== 'parakeet') return false;
+
     try {
-      const models = await invoke<any[]>('parakeet_get_available_models');
+      const models = await invoke<ParakeetModelInfo[]>('parakeet_get_available_models');
       const isDownloading = models.some(m =>
-        m.status && (
-          typeof m.status === 'object'
-            ? 'Downloading' in m.status
-            : m.status === 'Downloading'
-        )
+        m.name === transcriptModelConfig.model &&
+        typeof m.status === 'object' &&
+        'Downloading' in m.status
       );
       return isDownloading;
     } catch (error) {
       console.error('Failed to check model download status:', error);
       return false; // Default to not downloading (will show error + modal)
     }
-  }, []);
+  }, [transcriptModelConfig.provider, transcriptModelConfig.model]);
 
   // Handle manual recording start (from button click)
   const handleRecordingStart = useCallback(async () => {
