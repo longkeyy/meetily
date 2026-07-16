@@ -3,7 +3,10 @@ import { Globe, Info } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
-import { getTranscriptionLanguageCapability } from '@/lib/parakeet';
+import {
+  getTranscriptionLanguageCapability,
+  supportsTranscriptionLanguage,
+} from '@/lib/parakeet';
 
 export interface Language {
   code: string;
@@ -16,6 +19,7 @@ const LANGUAGES: Language[] = [
   { code: 'auto-translate', name: 'Auto Detect (Translate to English)' },
   { code: 'en', name: 'English' },
   { code: 'zh', name: 'Chinese' },
+  { code: 'yue', name: 'Cantonese' },
   { code: 'de', name: 'German' },
   { code: 'es', name: 'Spanish' },
   { code: 'ru', name: 'Russian' },
@@ -33,6 +37,7 @@ const LANGUAGES: Language[] = [
   { code: 'id', name: 'Indonesian' },
   { code: 'hi', name: 'Hindi' },
   { code: 'fi', name: 'Finnish' },
+  { code: 'fil', name: 'Filipino' },
   { code: 'vi', name: 'Vietnamese' },
   { code: 'he', name: 'Hebrew' },
   { code: 'uk', name: 'Ukrainian' },
@@ -119,7 +124,7 @@ interface LanguageSelectionProps {
   selectedLanguage: string;
   onLanguageChange: (language: string) => void;
   disabled?: boolean;
-  provider?: 'localWhisper' | 'parakeet' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
+  provider?: 'localWhisper' | 'parakeet' | 'qwen3Asr' | 'deepgram' | 'elevenLabs' | 'groq' | 'openai';
   model?: string;
 }
 
@@ -136,8 +141,11 @@ export function LanguageSelection({
   const languageCapability = getTranscriptionLanguageCapability(provider, model);
   const availableLanguages = !languageCapability.allowsLanguageSelection
     ? [{ code: 'auto', name: languageCapability.displayName }]
-    : LANGUAGES;
+    : LANGUAGES.filter((language) =>
+        supportsTranscriptionLanguage(languageCapability, language.code)
+      );
   const effectiveLanguage = languageCapability.allowsLanguageSelection
+    && supportsTranscriptionLanguage(languageCapability, selectedLanguage)
     ? selectedLanguage
     : 'auto';
 
@@ -209,7 +217,7 @@ export function LanguageSelection({
           <div className="p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
             <p className="font-medium flex items-center gap-1.5">
               <Info className="h-3.5 w-3.5" />
-              Parakeet language support
+              Model language support
             </p>
             <p className="mt-1 text-xs">{languageCapability.description}</p>
           </div>

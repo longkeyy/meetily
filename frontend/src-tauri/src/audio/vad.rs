@@ -1,4 +1,7 @@
 use anyhow::{anyhow, Result};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 use silero_rs::{VadConfig, VadSession, VadTransition};
 use log::{debug, info, warn};
 use std::collections::VecDeque;
@@ -21,6 +24,8 @@ pub struct ContinuousVadProcessor {
     session: VadSession,
     chunk_size: usize,
     sample_rate: u32,
+    resampler: Option<SincFixedIn<f32>>,
+    resampler_input_buffer: Vec<f32>,
     buffer: Vec<f32>,
     speech_segments: VecDeque<SpeechSegment>,
     in_speech: bool,
@@ -79,13 +84,38 @@ impl ContinuousVadProcessor {
             ((duration_ms as usize * VAD_SAMPLE_RATE) / 1000).max(vad_chunk_size)
         });
 
+        let resampler = if input_sample_rate == VAD_SAMPLE_RATE_HZ {
+            None
+        } else {
+            let input_frames = ((input_sample_rate as usize) / 100).max(1);
+            let params = SincInterpolationParameters {
+                sinc_len: 256,
+                f_cutoff: 0.95,
+                interpolation: SincInterpolationType::Cubic,
+                oversampling_factor: 256,
+                window: WindowFunction::BlackmanHarris2,
+            };
+            Some(
+                SincFixedIn::<f32>::new(
+                    VAD_SAMPLE_RATE_HZ as f64 / input_sample_rate as f64,
+                    2.0,
+                    params,
+                    input_frames,
+                    1,
+                )
+                .map_err(|error| anyhow!("Failed to create VAD resampler: {error}"))?,
+            )
+        };
+
         info!("VAD processor created: input={}Hz, vad={}Hz, chunk_size={} samples, live_segment_limit={:?}ms",
               input_sample_rate, VAD_SAMPLE_RATE_HZ, vad_chunk_size, max_live_segment_duration_ms);
 
         Ok(Self {
             session,
             chunk_size: vad_chunk_size,
-            sample_rate: input_sample_rate, // Store input rate for resampling ratio in resample_to_16k()
+            sample_rate: input_sample_rate,
+            resampler,
+            resampler_input_buffer: Vec::new(),
             buffer: Vec::with_capacity(vad_chunk_size * 2),
             speech_segments: VecDeque::new(),
             in_speech: false,
@@ -125,52 +155,46 @@ impl ContinuousVadProcessor {
         Ok(completed_segments)
     }
 
-    /// Improved resampling from input sample rate to 16kHz with anti-aliasing
-    /// Uses linear interpolation and basic low-pass filtering for better quality
-    fn resample_to_16k(&self, samples: &[f32]) -> Result<Vec<f32>> {
+    /// Resample to 16kHz while preserving the filter state across audio callbacks.
+    fn resample_to_16k(&mut self, samples: &[f32]) -> Result<Vec<f32>> {
         if self.sample_rate == 16000 {
             return Ok(samples.to_vec());
         }
 
-        // Calculate downsampling ratio
-        let ratio = self.sample_rate as f64 / 16000.0;
-        let output_len = (samples.len() as f64 / ratio) as usize;
-        let mut resampled = Vec::with_capacity(output_len);
+        self.resampler_input_buffer.extend_from_slice(samples);
+        let mut resampled = Vec::with_capacity(
+            samples.len() * VAD_SAMPLE_RATE / self.sample_rate as usize + self.chunk_size,
+        );
 
-        // Apply simple low-pass filter before downsampling to reduce aliasing
-        let cutoff_freq = 0.4; // Normalized frequency (0.4 * Nyquist)
-        let mut filtered_samples = Vec::with_capacity(samples.len());
-        
-        // Simple moving average filter (basic low-pass)
-        let filter_size = (self.sample_rate as f64 / (cutoff_freq * self.sample_rate as f64)) as usize;
-        let filter_size = std::cmp::max(1, std::cmp::min(filter_size, 5)); // Limit filter size
-        
-        for i in 0..samples.len() {
-            let start = if i >= filter_size { i - filter_size } else { 0 };
-            let end = std::cmp::min(i + filter_size + 1, samples.len());
-            let sum: f32 = samples[start..end].iter().sum();
-            filtered_samples.push(sum / (end - start) as f32);
-        }
+        loop {
+            let input_frames = self
+                .resampler
+                .as_ref()
+                .ok_or_else(|| anyhow!("VAD resampler is not initialized"))?
+                .input_frames_next();
+            if self.resampler_input_buffer.len() < input_frames {
+                break;
+            }
 
-        // Linear interpolation downsampling
-        for i in 0..output_len {
-            let source_pos = i as f64 * ratio;
-            let source_index = source_pos as usize;
-            let fraction = source_pos - source_index as f64;
-            
-            if source_index + 1 < filtered_samples.len() {
-                // Linear interpolation
-                let sample1 = filtered_samples[source_index];
-                let sample2 = filtered_samples[source_index + 1];
-                let interpolated = sample1 + (sample2 - sample1) * fraction as f32;
-                resampled.push(interpolated);
-            } else if source_index < filtered_samples.len() {
-                resampled.push(filtered_samples[source_index]);
+            let input: Vec<f32> = self.resampler_input_buffer.drain(..input_frames).collect();
+            let mut output = self
+                .resampler
+                .as_mut()
+                .expect("resampler was checked above")
+                .process(&[input], None)
+                .map_err(|error| anyhow!("VAD resampling failed: {error}"))?;
+            if let Some(channel) = output.pop() {
+                resampled.extend(channel.into_iter().map(|sample| sample.clamp(-1.0, 1.0)));
             }
         }
 
-        debug!("Resampled from {} samples ({}Hz) to {} samples (16kHz) with anti-aliasing",
-               samples.len(), self.sample_rate, resampled.len());
+        debug!(
+            "Resampled {} input samples ({}Hz) to {} samples (16kHz), {} input samples buffered",
+            samples.len(),
+            self.sample_rate,
+            resampled.len(),
+            self.resampler_input_buffer.len()
+        );
 
         Ok(resampled)
     }
@@ -182,6 +206,23 @@ impl ContinuousVadProcessor {
               self.buffer.len(), self.speech_segments.len());
 
         let mut completed_segments = Vec::new();
+
+        if !self.resampler_input_buffer.is_empty() {
+            let remaining = std::mem::take(&mut self.resampler_input_buffer);
+            let mut output = self
+                .resampler
+                .as_mut()
+                .ok_or_else(|| anyhow!("VAD resampler is not initialized"))?
+                .process_partial(Some(&[remaining]), None)
+                .map_err(|error| anyhow!("Failed to flush VAD resampler: {error}"))?;
+            if let Some(channel) = output.pop() {
+                self.buffer.extend(
+                    channel
+                        .into_iter()
+                        .map(|sample| sample.clamp(-1.0, 1.0)),
+                );
+            }
+        }
 
         // Process any remaining buffered audio
         if !self.buffer.is_empty() {
@@ -527,6 +568,38 @@ mod tests {
         }
 
         samples
+    }
+
+    #[test]
+    fn stateful_resampling_is_independent_of_callback_boundaries() {
+        let input_rate = 48_000;
+        let input: Vec<f32> = (0..47_520)
+            .map(|index| {
+                let time = index as f32 / input_rate as f32;
+                0.4 * (2.0 * std::f32::consts::PI * 440.0 * time).sin()
+            })
+            .collect();
+
+        let mut single = ContinuousVadProcessor::new(input_rate, 400)
+            .expect("failed to create single-call processor");
+        let expected = single
+            .resample_to_16k(&input)
+            .expect("single-call resampling failed");
+
+        let mut chunked = ContinuousVadProcessor::new(input_rate, 400)
+            .expect("failed to create chunked processor");
+        let mut actual = Vec::new();
+        for chunk in input.chunks(2_317) {
+            actual.extend(
+                chunked
+                    .resample_to_16k(chunk)
+                    .expect("chunked resampling failed"),
+            );
+        }
+
+        assert!(15_840usize.abs_diff(expected.len()) <= 64);
+        assert_eq!(actual, expected);
+        assert!(chunked.resampler_input_buffer.is_empty());
     }
 
     #[test]

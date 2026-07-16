@@ -45,6 +45,21 @@ export interface TranscriptionLanguageCapability {
   displayName: string;
   description: string;
   analyticsLanguage: string;
+  supportedLanguageCodes?: readonly string[];
+}
+
+export const QWEN3_ASR_LANGUAGE_CODES = [
+  'auto', 'en', 'zh', 'yue', 'ar', 'de', 'fr', 'es', 'pt', 'id', 'it', 'ko',
+  'ru', 'th', 'vi', 'ja', 'tr', 'hi', 'ms', 'nl', 'sv', 'da', 'fi', 'pl',
+  'cs', 'fil', 'fa', 'el', 'hu', 'mk', 'ro',
+] as const;
+
+export function supportsTranscriptionLanguage(
+  capability: TranscriptionLanguageCapability,
+  languageCode: string
+): boolean {
+  return !capability.supportedLanguageCodes
+    || capability.supportedLanguageCodes.includes(languageCode);
 }
 
 export const MODEL_DISPLAY_CONFIG: Record<string, ModelDisplayInfo> = {
@@ -145,6 +160,16 @@ export function getTranscriptionLanguageCapability(
   provider?: string,
   modelName?: string
 ): TranscriptionLanguageCapability {
+  if (provider === 'qwen3Asr') {
+    return {
+      allowsLanguageSelection: true,
+      displayName: 'Automatic or selected language',
+      description: 'Choose Chinese or another supported language to improve accuracy, or keep automatic detection for multilingual speech.',
+      analyticsLanguage: 'selected',
+      supportedLanguageCodes: QWEN3_ASR_LANGUAGE_CODES,
+    };
+  }
+
   if (provider !== 'parakeet') {
     return {
       allowsLanguageSelection: true,

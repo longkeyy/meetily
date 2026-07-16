@@ -8,11 +8,32 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
 
 const COREML_CTC_LIVE_SEGMENT_DURATION_MS: u32 = 5_000;
+const QWEN3_ASR_AUTO_LIVE_SEGMENT_DURATION_MS: u32 = 4_000;
+const QWEN3_ASR_HINTED_LIVE_SEGMENT_DURATION_MS: u32 = 3_000;
 
-fn max_live_segment_duration_ms(provider: &str, model: &str) -> Option<u32> {
-    (provider == "parakeet"
-        && model == crate::parakeet_engine::ctc::PARAKEET_CTC_ZH_CN_MODEL)
-        .then_some(COREML_CTC_LIVE_SEGMENT_DURATION_MS)
+fn max_live_segment_duration_ms(
+    provider: &str,
+    model: &str,
+    language: Option<&str>,
+) -> Option<u32> {
+    if provider == "parakeet"
+        && model == crate::parakeet_engine::ctc::PARAKEET_CTC_ZH_CN_MODEL
+    {
+        Some(COREML_CTC_LIVE_SEGMENT_DURATION_MS)
+    } else if provider == "qwen3Asr" && crate::qwen_asr_engine::is_supported_model(model) {
+        match language {
+            Some(language)
+                if !language.is_empty()
+                    && language != "auto"
+                    && language != "auto-translate" =>
+            {
+                Some(QWEN3_ASR_HINTED_LIVE_SEGMENT_DURATION_MS)
+            }
+            _ => Some(QWEN3_ASR_AUTO_LIVE_SEGMENT_DURATION_MS),
+        }
+    } else {
+        None
+    }
 }
 
 // ============================================================================
@@ -138,7 +159,7 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
             match crate::parakeet_engine::commands::parakeet_validate_model_ready_with_config(app).await {
                 Ok(model_name) => {
                     info!("✅ Parakeet model validation successful: {} is ready", model_name);
-                    Ok(max_live_segment_duration_ms("parakeet", &model_name))
+                    Ok(max_live_segment_duration_ms("parakeet", &model_name, None))
                 }
                 Err(e) => {
                     warn!("❌ Parakeet model validation failed: {}", e);
@@ -146,10 +167,25 @@ pub async fn validate_transcription_model_ready<R: Runtime>(
                 }
             }
         }
+        "qwen3Asr" => {
+            info!("Validating Qwen3-ASR model...");
+            crate::qwen_asr_engine::commands::qwen_asr_init().await?;
+            let model_name =
+                crate::qwen_asr_engine::commands::qwen_asr_validate_model_ready(
+                    config.model.clone(),
+                )
+                .await?;
+            let language = crate::get_language_preference_internal();
+            Ok(max_live_segment_duration_ms(
+                "qwen3Asr",
+                &model_name,
+                language.as_deref(),
+            ))
+        }
         other => {
             warn!("❌ Unsupported transcription provider for local recording: {}", other);
             Err(format!(
-                "Provider '{}' is not supported for local transcription. Please select 'localWhisper' or 'parakeet'.",
+                "Provider '{}' is not supported for local transcription. Please select Local Whisper, Parakeet, or Qwen3-ASR.",
                 other
             ))
         }
@@ -161,24 +197,50 @@ mod tests {
     use super::max_live_segment_duration_ms;
 
     #[test]
-    fn live_segmentation_is_limited_to_coreml_ctc() {
+    fn live_segmentation_is_limited_to_bounded_latency_models() {
         assert_eq!(
             max_live_segment_duration_ms(
                 "parakeet",
                 crate::parakeet_engine::ctc::PARAKEET_CTC_ZH_CN_MODEL,
+                None,
             ),
             Some(5_000),
         );
         assert_eq!(
-            max_live_segment_duration_ms("parakeet", "parakeet-tdt-0.6b-v3-int8"),
+            max_live_segment_duration_ms("parakeet", "parakeet-tdt-0.6b-v3-int8", None),
             None,
         );
         assert_eq!(
             max_live_segment_duration_ms(
                 "localWhisper",
                 crate::parakeet_engine::ctc::PARAKEET_CTC_ZH_CN_MODEL,
+                None,
             ),
             None,
+        );
+        assert_eq!(
+            max_live_segment_duration_ms(
+                "qwen3Asr",
+                crate::qwen_asr_engine::QWEN3_ASR_MODEL,
+                None,
+            ),
+            Some(4_000),
+        );
+        assert_eq!(
+            max_live_segment_duration_ms(
+                "qwen3Asr",
+                crate::qwen_asr_engine::QWEN3_ASR_MODEL,
+                Some("zh"),
+            ),
+            Some(3_000),
+        );
+        assert_eq!(
+            max_live_segment_duration_ms(
+                "qwen3Asr",
+                crate::qwen_asr_engine::QWEN3_ASR_1_7B_MODEL,
+                Some("zh"),
+            ),
+            Some(3_000),
         );
     }
 }
@@ -256,6 +318,30 @@ pub async fn get_or_init_transcription_engine<R: Runtime>(
                     Err("Parakeet engine not initialized. This should not happen after validation.".to_string())
                 }
             }
+        }
+        "qwen3Asr" => {
+            let engine = {
+                let guard = crate::qwen_asr_engine::commands::QWEN_ASR_ENGINE
+                    .lock()
+                    .unwrap();
+                guard.as_ref().cloned()
+            }
+            .ok_or_else(|| "Qwen3-ASR engine is not initialized".to_string())?;
+
+            if !engine.is_model_loaded().await {
+                return Err("Qwen3-ASR engine is initialized but no model is loaded".to_string());
+            }
+            let loaded_model = engine
+                .get_current_model()
+                .await
+                .ok_or_else(|| "Qwen3-ASR loaded model name is unavailable".to_string())?;
+            if loaded_model != config.model {
+                return Err(format!(
+                    "Loaded Qwen3-ASR model '{}' does not match configured model '{}'",
+                    loaded_model, config.model
+                ));
+            }
+            Ok(TranscriptionEngine::Provider(engine))
         }
         "localWhisper" | _ => {
             info!("🎤 Initializing Whisper transcription engine");

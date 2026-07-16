@@ -25,7 +25,7 @@ struct AudioMixerRingBuffer {
 impl AudioMixerRingBuffer {
     fn new(sample_rate: u32) -> Self {
         // Use 50ms windows for mixing
-        let window_ms = 600.0;
+        let window_ms = 50.0;
         let window_size_samples = (sample_rate as f32 * window_ms / 1000.0) as usize;
 
         // CRITICAL FIX: Increase max buffer to 400ms for system audio stability
@@ -75,7 +75,7 @@ impl AudioMixerRingBuffer {
                   self.system_buffer.len() - self.max_buffer_size);
         }
 
-        // Safety: prevent buffer overflow (keep only last 200ms)
+        // Safety: prevent buffer overflow (keep only the last 400ms)
         while self.mic_buffer.len() > self.max_buffer_size {
             self.mic_buffer.pop_front();
         }
@@ -1083,5 +1083,34 @@ impl AudioPipelineManager {
 impl Default for AudioPipelineManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixer_uses_fifty_millisecond_windows() {
+        let mixer = AudioMixerRingBuffer::new(48_000);
+
+        assert_eq!(mixer.window_size_samples, 2_400);
+        assert_eq!(mixer.max_buffer_size, 19_200);
+    }
+
+    #[test]
+    fn mixer_pads_a_missing_source_without_delaying_the_available_source() {
+        let mut mixer = AudioMixerRingBuffer::new(48_000);
+        let microphone = vec![0.25; 2_400];
+        mixer.add_samples(DeviceType::Microphone, microphone.clone());
+
+        let (mic_window, system_window) = mixer
+            .extract_window()
+            .expect("a complete microphone window should be mixable");
+
+        assert_eq!(mic_window, microphone);
+        assert_eq!(system_window, vec![0.0; 2_400]);
+        assert!(mixer.mic_buffer.is_empty());
+        assert!(mixer.system_buffer.is_empty());
     }
 }
