@@ -81,11 +81,8 @@ export function useRecordingStart(
       );
       const isDownloading = models.some(m =>
         m.name === transcriptModelConfig.model &&
-        m.status && (
-          typeof m.status === 'object'
-            ? 'Downloading' in m.status
-            : m.status === 'Downloading'
-        )
+        typeof m.status === 'object' &&
+        'Downloading' in m.status
       );
       return isDownloading;
     } catch (error) {
