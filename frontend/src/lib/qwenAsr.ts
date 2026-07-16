@@ -1,6 +1,25 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export const QWEN3_ASR_MODEL = 'qwen3-asr-0.6b-int8';
+export const QWEN3_ASR_1_7B_MODEL = 'qwen3-asr-1.7b-int8';
+
+export interface QwenModelDisplayInfo {
+  name: string;
+  tagline: string;
+  recommended?: boolean;
+}
+
+export const QWEN_MODEL_DISPLAY: Record<string, QwenModelDisplayInfo> = {
+  [QWEN3_ASR_MODEL]: {
+    name: 'Qwen3-ASR 0.6B Int8',
+    tagline: 'Compact multilingual recognition with Chinese dialect support',
+    recommended: true,
+  },
+  [QWEN3_ASR_1_7B_MODEL]: {
+    name: 'Qwen3-ASR 1.7B Int8',
+    tagline: 'Higher-capacity multilingual recognition with improved accuracy',
+  },
+};
 
 export type QwenModelStatus =
   | 'Available'
@@ -23,7 +42,8 @@ export const QwenAsrAPI = {
   downloadModel: (modelName: string) =>
     invoke<void>('qwen_asr_download_model', { modelName }),
   cancelDownload: () => invoke<void>('qwen_asr_cancel_download'),
-  deleteModel: () => invoke<void>('qwen_asr_delete_model'),
+  deleteModel: (modelName: string) =>
+    invoke<void>('qwen_asr_delete_model', { modelName }),
   openModelsFolder: () => invoke<void>('open_qwen_asr_models_folder'),
 };
 
