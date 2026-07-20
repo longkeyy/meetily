@@ -5,6 +5,7 @@ export const QWEN3_ASR_1_7B_MODEL = 'qwen3-asr-1.7b-int8';
 
 export interface QwenModelDisplayInfo {
   name: string;
+  icon: string;
   tagline: string;
   recommended?: boolean;
 }
@@ -12,11 +13,13 @@ export interface QwenModelDisplayInfo {
 export const QWEN_MODEL_DISPLAY: Record<string, QwenModelDisplayInfo> = {
   [QWEN3_ASR_MODEL]: {
     name: 'Qwen3-ASR 0.6B Int8',
+    icon: '🌐',
     tagline: 'Compact multilingual recognition with Chinese dialect support',
     recommended: true,
   },
   [QWEN3_ASR_1_7B_MODEL]: {
     name: 'Qwen3-ASR 1.7B Int8',
+    icon: '🧠',
     tagline: 'Higher-capacity multilingual recognition with improved accuracy',
   },
 };
