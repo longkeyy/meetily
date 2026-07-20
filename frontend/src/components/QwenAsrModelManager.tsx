@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { CheckCircle2, Download, FolderOpen, Languages, Loader2, Trash2, X } from 'lucide-react';
+import { CheckCircle2, Download, FolderOpen, Loader2, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   QwenAsrAPI,
@@ -173,6 +173,7 @@ export function QwenAsrModelManager({
       {models.map((model) => {
         const display = QWEN_MODEL_DISPLAY[model.name] ?? {
           name: model.name,
+          icon: '🎙️',
           tagline: model.description,
         };
         const download = downloads[model.name];
@@ -191,7 +192,9 @@ export function QwenAsrModelManager({
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Languages className="h-6 w-6 shrink-0 text-blue-600" />
+                  <span aria-hidden="true" className="shrink-0 text-2xl leading-none">
+                    {display.icon}
+                  </span>
                   <h3 className="text-sm font-semibold text-gray-900">{display.name}</h3>
                   {display.recommended && (
                     <span className="bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700">Recommended</span>
