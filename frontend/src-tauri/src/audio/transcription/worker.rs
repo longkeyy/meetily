@@ -693,27 +693,36 @@ async fn transcribe_chunk_with_provider<R: Runtime>(
                     Ok((cleaned_text, result.confidence, result.is_partial))
                 }
                 Err(e) => {
-                    error!(
-                        "{} transcription failed for chunk {}: {}",
-                        provider.provider_name(),
-                        chunk.chunk_id,
-                        e
-                    );
+                    if should_emit_transcription_error(&e) {
+                        error!(
+                            "{} transcription failed for chunk {}: {}",
+                            provider.provider_name(),
+                            chunk.chunk_id,
+                            e
+                        );
 
-                    let _ = app.emit(
-                        "transcription-error",
-                        &serde_json::json!({
-                            "error": e.to_string(),
-                            "userMessage": format!("Transcription failed: {}", e),
-                            "actionable": false
-                        }),
-                    );
+                        let _ = app.emit(
+                            "transcription-error",
+                            &serde_json::json!({
+                                "error": e.to_string(),
+                                "userMessage": format!("Transcription failed: {}", e),
+                                "actionable": false
+                            }),
+                        );
+                    }
 
                     Err(e)
                 }
             }
         }
     }
+}
+
+fn should_emit_transcription_error(error: &TranscriptionError) -> bool {
+    !matches!(
+        error,
+        TranscriptionError::AudioTooShort { .. } | TranscriptionError::ModelNotLoaded
+    )
 }
 
 /// Format current timestamp (wall-clock time)
@@ -763,6 +772,22 @@ mod tests {
             serde_json::to_string(&TranscriptSource::SystemAudio).unwrap(),
             "\"system\""
         );
+    }
+
+    #[test]
+    fn expected_short_audio_does_not_reach_the_user_error_channel() {
+        assert!(!should_emit_transcription_error(
+            &TranscriptionError::AudioTooShort {
+                samples: 1_120,
+                minimum: 1_600,
+            }
+        ));
+        assert!(!should_emit_transcription_error(
+            &TranscriptionError::ModelNotLoaded
+        ));
+        assert!(should_emit_transcription_error(
+            &TranscriptionError::EngineFailed("decoder failed".to_string())
+        ));
     }
 
     #[test]
