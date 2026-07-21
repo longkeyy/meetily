@@ -5,6 +5,17 @@ import {
 } from '../../src/lib/conversation-assistant';
 
 describe('conversation assistant state', () => {
+  test('loads the persisted profile and enabled preference', () => {
+    const state = assistantReducer(initialAssistantState, {
+      type: 'settingsLoaded',
+      enabled: true,
+      profile: 'interview',
+    });
+    expect(state.enabled).toBe(true);
+    expect(state.profile).toBe('interview');
+    expect(state.status).toBe('waiting');
+  });
+
   test('tracks speaker and microphone activity independently', () => {
     let state = assistantReducer(initialAssistantState, { type: 'setEnabled', enabled: true });
     state = assistantReducer(state, { type: 'sourceActivity', source: 'system', active: true });

@@ -262,12 +262,17 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     });
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
+    let assistant_settings = crate::assistant::settings::load_assistant_settings(&app).await;
+    let assistant_checkpoint_ms = assistant_settings.live_checkpoint_ms();
+    let live_checkpoint_ms = max_live_segment_duration_ms
+        .map(|duration_ms| duration_ms.min(assistant_checkpoint_ms))
+        .unwrap_or(assistant_checkpoint_ms);
     let (transcription_receiver, source_activity_receiver) = manager
         .start_recording(
             microphone_device,
             system_device,
             auto_save,
-            max_live_segment_duration_ms,
+            live_checkpoint_ms,
         )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
@@ -451,12 +456,17 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     });
 
     // Start recording with specified devices and auto_save setting
+    let assistant_settings = crate::assistant::settings::load_assistant_settings(&app).await;
+    let assistant_checkpoint_ms = assistant_settings.live_checkpoint_ms();
+    let live_checkpoint_ms = max_live_segment_duration_ms
+        .map(|duration_ms| duration_ms.min(assistant_checkpoint_ms))
+        .unwrap_or(assistant_checkpoint_ms);
     let (transcription_receiver, source_activity_receiver) = manager
         .start_recording(
             mic_device,
             system_device,
             auto_save,
-            max_live_segment_duration_ms,
+            live_checkpoint_ms,
         )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;

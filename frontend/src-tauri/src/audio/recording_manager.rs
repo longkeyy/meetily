@@ -67,7 +67,7 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
-        max_live_segment_duration_ms: Option<u32>,
+        live_checkpoint_ms: u32,
     ) -> Result<(
         mpsc::UnboundedReceiver<AudioChunk>,
         mpsc::UnboundedReceiver<SourceActivityEvent>,
@@ -127,8 +127,8 @@ impl RecordingManager {
             self.state.clone(),
             transcription_sender,
             source_activity_sender,
-            max_live_segment_duration_ms,
-            48000, // 48kHz sample rate
+            live_checkpoint_ms,
+            48000,                  // 48kHz sample rate
             Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
             mic_name,
             mic_kind,
@@ -192,7 +192,7 @@ impl RecordingManager {
     pub async fn start_recording_with_defaults_and_auto_save(
         &mut self,
         auto_save: bool,
-        max_live_segment_duration_ms: Option<u32>,
+        live_checkpoint_ms: u32,
     ) -> Result<(
         mpsc::UnboundedReceiver<AudioChunk>,
         mpsc::UnboundedReceiver<SourceActivityEvent>,
@@ -221,8 +221,9 @@ impl RecordingManager {
                 microphone_device,
                 system_device,
                 auto_save,
-                max_live_segment_duration_ms,
-            ).await
+                live_checkpoint_ms,
+            )
+            .await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -261,8 +262,9 @@ impl RecordingManager {
                 microphone_device,
                 system_device,
                 auto_save,
-                max_live_segment_duration_ms,
-            ).await
+                live_checkpoint_ms,
+            )
+            .await
         }
     }
 

@@ -758,7 +758,7 @@ impl AudioPipeline {
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
         source_activity_sender: mpsc::UnboundedSender<SourceActivityEvent>,
         state: Arc<RecordingState>,
-        max_live_segment_duration_ms: Option<u32>,
+        live_checkpoint_ms: u32,
         sample_rate: u32,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
@@ -800,19 +800,16 @@ impl AudioPipeline {
             ContinuousVadProcessor::new_with_max_segment_duration(
                 sample_rate,
                 redemption_time,
-                max_live_segment_duration_ms,
+                Some(live_checkpoint_ms),
             )
             .unwrap_or_else(|error| panic!("VAD processor creation failed: {error}"))
         };
         let microphone_vad_processor = create_vad_processor();
         let system_vad_processor = create_vad_processor();
-        match max_live_segment_duration_ms {
-            Some(duration_ms) => info!(
-                "Source-separated VAD pipeline: natural speech boundaries with a {}ms live transcription limit",
-                duration_ms
-            ),
-            None => info!("Source-separated VAD pipeline: using natural speech boundaries"),
-        }
+        info!(
+            "Source-separated VAD pipeline: natural speech boundaries with a {}ms live checkpoint",
+            live_checkpoint_ms
+        );
 
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
@@ -1096,7 +1093,7 @@ impl AudioPipelineManager {
         state: Arc<RecordingState>,
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
         source_activity_sender: mpsc::UnboundedSender<SourceActivityEvent>,
-        max_live_segment_duration_ms: Option<u32>,
+        live_checkpoint_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
         mic_device_name: String,
@@ -1127,7 +1124,7 @@ impl AudioPipelineManager {
             transcription_sender,
             source_activity_sender,
             state.clone(),
-            max_live_segment_duration_ms,
+            live_checkpoint_ms,
             sample_rate,
             mic_device_name,
             mic_device_kind,

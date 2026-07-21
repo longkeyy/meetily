@@ -17,7 +17,7 @@ export function InterviewAssistantPanel() {
   const { transcripts } = useTranscripts();
   const { isRecording, isPaused } = useRecordingState();
   const { modelConfig } = useConfig();
-  const { state, setEnabled, refreshSuggestion } = useConversationAssistant({
+  const { state, settings, settingsReady, setEnabled, refreshSuggestion } = useConversationAssistant({
     isRecording,
     isPaused,
     transcripts,
@@ -26,11 +26,14 @@ export function InterviewAssistantPanel() {
   if (!isRecording) return null;
 
   const handleEnabledChange = (enabled: boolean) => {
-    if (enabled && EXTERNAL_PROVIDERS.has(modelConfig.provider)) {
-      const acknowledgementKey = `conversationAssistant.privacyAcknowledged.${modelConfig.provider}`;
+    const effectiveProvider = settings.modelMode === 'custom'
+      ? settings.provider
+      : modelConfig.provider;
+    if (enabled && effectiveProvider && EXTERNAL_PROVIDERS.has(effectiveProvider)) {
+      const acknowledgementKey = `conversationAssistant.privacyAcknowledged.${effectiveProvider}`;
       if (localStorage.getItem(acknowledgementKey) !== 'true') {
         toast.info('Interview Assistant enabled', {
-          description: `Live transcript context will be sent to the configured ${modelConfig.provider} provider.`,
+          description: `Live transcript context will be sent to the configured ${effectiveProvider} provider.`,
           duration: 7000,
         });
         localStorage.setItem(acknowledgementKey, 'true');
@@ -48,6 +51,7 @@ export function InterviewAssistantPanel() {
   return (
     <InterviewAssistantPanelView
       state={state}
+      settingsReady={settingsReady}
       hasTranscripts={transcripts.length > 0}
       onEnabledChange={handleEnabledChange}
       onRefresh={refreshSuggestion}
@@ -58,6 +62,7 @@ export function InterviewAssistantPanel() {
 
 interface InterviewAssistantPanelViewProps {
   state: AssistantState;
+  settingsReady: boolean;
   hasTranscripts: boolean;
   onEnabledChange: (enabled: boolean) => void;
   onRefresh: () => void;
@@ -66,6 +71,7 @@ interface InterviewAssistantPanelViewProps {
 
 export function InterviewAssistantPanelView({
   state,
+  settingsReady,
   hasTranscripts,
   onEnabledChange,
   onRefresh,
@@ -126,6 +132,7 @@ export function InterviewAssistantPanelView({
         <Switch
           checked={state.enabled}
           onCheckedChange={onEnabledChange}
+          disabled={!settingsReady}
           aria-label="Enable Interview Assistant"
         />
       </div>

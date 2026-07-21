@@ -14,6 +14,7 @@ export interface AssistantState {
 }
 
 export type AssistantAction =
+  | { type: 'settingsLoaded'; enabled: boolean; profile: AssistantProfile }
   | { type: 'setEnabled'; enabled: boolean }
   | { type: 'sourceActivity'; source: 'mic' | 'system'; active: boolean }
   | { type: 'generationStarted'; requestId: string }
@@ -42,6 +43,16 @@ function idleStatus(state: Pick<AssistantState, 'enabled' | 'speakerActive' | 'm
 
 export function assistantReducer(state: AssistantState, action: AssistantAction): AssistantState {
   switch (action.type) {
+    case 'settingsLoaded': {
+      const next = {
+        ...state,
+        enabled: action.enabled,
+        profile: action.profile,
+        activeRequestId: null,
+        error: null,
+      };
+      return { ...next, status: idleStatus(next) };
+    }
     case 'setEnabled': {
       const next = {
         ...state,

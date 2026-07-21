@@ -1,14 +1,21 @@
 pub mod commands;
 mod profiles;
 mod service;
+pub mod settings;
 
 use crate::audio::recording_state::TranscriptSource;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AssistantProfile {
     Interview,
+}
+
+impl Default for AssistantProfile {
+    fn default() -> Self {
+        Self::Interview
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

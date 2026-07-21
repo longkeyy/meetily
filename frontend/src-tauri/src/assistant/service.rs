@@ -1,6 +1,7 @@
 use super::{
-    profiles::profile_definition, AssistantSuggestionRequest, AssistantSuggestionResponse,
-    AssistantTranscript, SuggestionTrigger,
+    settings::{load_assistant_settings, AssistantModelMode, AssistantSettings},
+    AssistantSuggestionRequest, AssistantSuggestionResponse, AssistantTranscript,
+    SuggestionTrigger,
 };
 use crate::database::repositories::setting::SettingsRepository;
 use crate::summary::llm_client::{generate_summary, LLMProvider};
@@ -46,8 +47,9 @@ pub async fn generate_suggestion<R: Runtime>(
 
     let cancellation_token = register_generation(&request.request_id);
     let result = async {
-        let config = load_llm_config(app, pool).await?;
-        let profile = profile_definition(request.profile);
+        let assistant_settings = load_assistant_settings(app).await;
+        let config = load_llm_config(app, pool, &assistant_settings).await?;
+        let system_prompt = assistant_settings.resolved_system_prompt(request.profile);
         let user_prompt = build_user_prompt(request.trigger, &context);
         let client = Client::new();
 
@@ -56,7 +58,7 @@ pub async fn generate_suggestion<R: Runtime>(
             &config.provider,
             &config.model,
             &config.api_key,
-            profile.system_prompt,
+            &system_prompt,
             &user_prompt,
             config.ollama_endpoint.as_deref(),
             config.custom_openai_endpoint.as_deref(),
@@ -120,14 +122,30 @@ fn cleanup_generation(request_id: &str) {
 async fn load_llm_config<R: Runtime>(
     app: &AppHandle<R>,
     pool: &SqlitePool,
+    assistant_settings: &AssistantSettings,
 ) -> Result<LlmRuntimeConfig, String> {
     let setting = SettingsRepository::get_model_config(pool)
         .await
-        .map_err(|error| format!("Failed to read summary model configuration: {error}"))?
-        .ok_or_else(|| "Configure a summary model before enabling the assistant".to_string())?;
-    let provider = LLMProvider::from_str(&setting.provider)?;
+        .map_err(|error| format!("Failed to read model provider configuration: {error}"))?
+        .ok_or_else(|| "Configure a model provider before enabling the assistant".to_string())?;
+    let (provider_name, model_override) = match assistant_settings.model_mode {
+        AssistantModelMode::FollowSummary => (setting.provider.clone(), None),
+        AssistantModelMode::Custom => (
+            assistant_settings
+                .provider
+                .clone()
+                .ok_or_else(|| "Assistant model provider is not configured".to_string())?,
+            Some(
+                assistant_settings
+                    .model
+                    .clone()
+                    .ok_or_else(|| "Assistant model is not configured".to_string())?,
+            ),
+        ),
+    };
+    let provider = LLMProvider::from_str(&provider_name)?;
 
-    let mut model = setting.model;
+    let mut model = model_override.clone().unwrap_or(setting.model);
     let mut custom_openai_endpoint = None;
     let mut api_key = String::new();
 
@@ -136,15 +154,17 @@ async fn load_llm_config<R: Runtime>(
             .await
             .map_err(|error| format!("Failed to read custom OpenAI configuration: {error}"))?
             .ok_or_else(|| "Custom OpenAI is selected but is not configured".to_string())?;
-        model = custom.model;
+        if model_override.is_none() {
+            model = custom.model;
+        }
         api_key = custom.api_key.unwrap_or_default();
         custom_openai_endpoint = Some(custom.endpoint);
     } else if !matches!(&provider, LLMProvider::Ollama | LLMProvider::BuiltInAI) {
-        api_key = SettingsRepository::get_api_key(pool, &setting.provider)
+        api_key = SettingsRepository::get_api_key(pool, &provider_name)
             .await
-            .map_err(|error| format!("Failed to read the summary API key: {error}"))?
+            .map_err(|error| format!("Failed to read the assistant API key: {error}"))?
             .filter(|key| !key.trim().is_empty())
-            .ok_or_else(|| format!("API key not found for {}", setting.provider))?;
+            .ok_or_else(|| format!("API key not found for {provider_name}"))?;
     }
 
     Ok(LlmRuntimeConfig {
@@ -283,5 +303,20 @@ mod tests {
 
         assert!(!context.contains("old response"));
         assert!(context.contains("latest question"));
+    }
+
+    #[test]
+    fn custom_prompt_is_resolved_from_assistant_settings() {
+        let mut settings = AssistantSettings::default();
+        settings.profiles.insert(
+            super::super::AssistantProfile::Interview,
+            super::super::settings::AssistantProfileSettings {
+                system_prompt: Some("Answer as a systems candidate.".to_string()),
+            },
+        );
+        assert_eq!(
+            settings.resolved_system_prompt(super::super::AssistantProfile::Interview),
+            "Answer as a systems candidate."
+        );
     }
 }
