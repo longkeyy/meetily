@@ -67,6 +67,7 @@ impl RecordingManager {
         microphone_device: Option<Arc<AudioDevice>>,
         system_device: Option<Arc<AudioDevice>>,
         auto_save: bool,
+        live_checkpoint_ms: u32,
     ) -> Result<(
         mpsc::UnboundedReceiver<AudioChunk>,
         mpsc::UnboundedReceiver<SourceActivityEvent>,
@@ -126,7 +127,7 @@ impl RecordingManager {
             self.state.clone(),
             transcription_sender,
             source_activity_sender,
-            0,                      // Ignored - using dynamic sizing internally
+            live_checkpoint_ms,
             48000,                  // 48kHz sample rate
             Some(recording_sender), // CRITICAL: Pass recording sender to receive pre-mixed audio
             mic_name,
@@ -215,8 +216,13 @@ impl RecordingManager {
             }
 
             // Start recording with selected devices and auto_save setting
-            self.start_recording(microphone_device, system_device, auto_save)
-                .await
+            self.start_recording(
+                microphone_device,
+                system_device,
+                auto_save,
+                crate::assistant::settings::DEFAULT_INTERVAL_SECONDS * 1_000,
+            )
+            .await
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -251,8 +257,13 @@ impl RecordingManager {
                 return Err(anyhow::anyhow!("No microphone device available"));
             }
 
-            self.start_recording(microphone_device, system_device, auto_save)
-                .await
+            self.start_recording(
+                microphone_device,
+                system_device,
+                auto_save,
+                crate::assistant::settings::DEFAULT_INTERVAL_SECONDS * 1_000,
+            )
+            .await
         }
     }
 

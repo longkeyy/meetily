@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { Transcript, SourceActivityEvent, AssistantSuggestionRequest, AssistantSuggestionResponse } from '@/types';
@@ -8,9 +8,14 @@ import {
   initialAssistantState,
   SuggestionTrigger,
 } from '@/lib/conversation-assistant';
+import { assistantSettingsService } from '@/services/assistantSettingsService';
+import {
+  AssistantSettings,
+  AssistantSettingsUpdate,
+  FALLBACK_ASSISTANT_SETTINGS,
+} from '@/types/assistant-settings';
 
 const ENABLED_STORAGE_KEY = 'conversationAssistant.interview.enabled';
-const PERIODIC_INTERVAL_MS = 30_000;
 const TURN_END_GRACE_MS = 800;
 const FINAL_TRANSCRIPT_WAIT_MS = 10_000;
 const TRANSCRIPT_COVERAGE_TOLERANCE_SECONDS = 1.5;
@@ -29,9 +34,16 @@ interface UseConversationAssistantOptions {
   transcripts: Transcript[];
 }
 
-function readInitialEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  return localStorage.getItem(ENABLED_STORAGE_KEY) === 'true';
+function toSettingsUpdate(settings: AssistantSettings): AssistantSettingsUpdate {
+  return {
+    enabledByDefault: settings.enabledByDefault,
+    profile: settings.profile,
+    intervalSeconds: settings.intervalSeconds,
+    modelMode: settings.modelMode,
+    provider: settings.modelMode === 'custom' ? settings.provider : null,
+    model: settings.modelMode === 'custom' ? settings.model : null,
+    systemPrompt: settings.systemPrompt,
+  };
 }
 
 export function useConversationAssistant({
@@ -39,14 +51,12 @@ export function useConversationAssistant({
   isPaused,
   transcripts,
 }: UseConversationAssistantOptions) {
-  const initialEnabled = readInitialEnabled();
-  const [state, dispatch] = useReducer(assistantReducer, {
-    ...initialAssistantState,
-    enabled: initialEnabled,
-    status: initialEnabled ? 'waiting' : 'disabled',
-  } satisfies AssistantState);
+  const [state, dispatch] = useReducer(assistantReducer, initialAssistantState);
+  const [assistantSettings, setAssistantSettings] = useState(FALLBACK_ASSISTANT_SETTINGS);
+  const [settingsReady, setSettingsReady] = useState(false);
 
   const stateRef = useRef(state);
+  const settingsRef = useRef(FALLBACK_ASSISTANT_SETTINGS);
   const transcriptsRef = useRef(transcripts);
   const speakerActiveRef = useRef(false);
   const micActiveRef = useRef(false);
@@ -65,6 +75,35 @@ export function useConversationAssistant({
   useEffect(() => {
     transcriptsRef.current = transcripts;
   }, [transcripts]);
+
+  useEffect(() => {
+    let disposed = false;
+    void assistantSettingsService.get().then(async (loaded) => {
+      let resolved = loaded;
+      const legacyEnabled = localStorage.getItem(ENABLED_STORAGE_KEY);
+      if (!loaded.isConfigured && legacyEnabled !== null) {
+        resolved = await assistantSettingsService.save({
+          ...toSettingsUpdate(loaded),
+          enabledByDefault: legacyEnabled === 'true',
+        });
+      }
+      localStorage.removeItem(ENABLED_STORAGE_KEY);
+      if (disposed) return;
+      settingsRef.current = resolved;
+      setAssistantSettings(resolved);
+      setSettingsReady(true);
+      dispatch({
+        type: 'settingsLoaded',
+        enabled: resolved.enabledByDefault,
+        profile: resolved.profile,
+      });
+    }).catch((error) => {
+      console.error('Failed to load assistant settings:', error);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   const clearTimer = useCallback((timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
     if (timerRef.current) {
@@ -125,7 +164,7 @@ export function useConversationAssistant({
     const requestId = `${Date.now()}-${++requestCounterRef.current}`;
     const request: AssistantSuggestionRequest = {
       requestId,
-      profile: 'interview',
+      profile: settingsRef.current.profile,
       trigger,
       focusStartTime,
       transcripts: context,
@@ -179,7 +218,8 @@ export function useConversationAssistant({
 
   const schedulePeriodicTrigger = useCallback((turnStartTime: number) => {
     clearTimer(periodicTimerRef);
-    let targetEndTime = turnStartTime + PERIODIC_INTERVAL_MS / 1000;
+    const intervalSeconds = settingsRef.current.intervalSeconds;
+    let targetEndTime = turnStartTime + intervalSeconds;
 
     const scheduleNext = () => {
       periodicTimerRef.current = setTimeout(() => {
@@ -187,13 +227,13 @@ export function useConversationAssistant({
         if (!speakerActiveRef.current || micActiveRef.current || !stateRef.current.enabled) return;
         pendingTriggerRef.current = {
           trigger: 'periodic',
-          focusStartTime: targetEndTime - PERIODIC_INTERVAL_MS / 1000,
+          focusStartTime: targetEndTime - intervalSeconds,
           targetEndTime,
         };
         tryRunPendingTrigger();
-        targetEndTime += PERIODIC_INTERVAL_MS / 1000;
+        targetEndTime += intervalSeconds;
         scheduleNext();
-      }, PERIODIC_INTERVAL_MS);
+      }, intervalSeconds * 1_000);
     };
 
     scheduleNext();
@@ -207,7 +247,8 @@ export function useConversationAssistant({
       return;
     }
 
-    const turnStartTime = speakerTurnStartRef.current ?? Math.max(0, turnEndTime - 30);
+    const turnStartTime = speakerTurnStartRef.current
+      ?? Math.max(0, turnEndTime - settingsRef.current.intervalSeconds);
     speakerTurnStartRef.current = null;
     pendingTriggerRef.current = {
       trigger: 'turnEnd',
@@ -303,8 +344,19 @@ export function useConversationAssistant({
   }, [clearPendingWork]);
 
   const setEnabled = useCallback((enabled: boolean) => {
-    localStorage.setItem(ENABLED_STORAGE_KEY, String(enabled));
+    const updatedSettings = {
+      ...settingsRef.current,
+      enabledByDefault: enabled,
+    };
+    settingsRef.current = updatedSettings;
+    setAssistantSettings(updatedSettings);
     dispatch({ type: 'setEnabled', enabled });
+    void assistantSettingsService.save(toSettingsUpdate(updatedSettings))
+      .then((saved) => {
+        settingsRef.current = saved;
+        setAssistantSettings(saved);
+      })
+      .catch((error) => console.error('Failed to persist assistant enabled state:', error));
     if (!enabled) {
       clearPendingWork();
       cancelGeneration();
@@ -322,11 +374,16 @@ export function useConversationAssistant({
       (latest, transcript) => Math.max(latest, transcript.audio_end_time ?? 0),
       0,
     );
-    void generateSuggestion('manual', Math.max(0, latestTime - 30));
+    void generateSuggestion(
+      'manual',
+      Math.max(0, latestTime - settingsRef.current.intervalSeconds),
+    );
   }, [generateSuggestion]);
 
   return {
     state,
+    settings: assistantSettings,
+    settingsReady,
     setEnabled,
     refreshSuggestion,
   };

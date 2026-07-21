@@ -20,7 +20,6 @@ use super::recording_state::{
 use super::vad::{ContinuousVadProcessor, VadActivityTransition};
 
 const MIN_TRANSCRIPTION_SEGMENT_SAMPLES: usize = 800;
-const ASSISTANT_LIVE_CHECKPOINT_MS: u32 = 30_000;
 
 /// Ring buffer for synchronized audio mixing
 /// Accumulates samples from mic and system streams until we have aligned windows
@@ -759,7 +758,7 @@ impl AudioPipeline {
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
         source_activity_sender: mpsc::UnboundedSender<SourceActivityEvent>,
         state: Arc<RecordingState>,
-        target_chunk_duration_ms: u32,
+        live_checkpoint_ms: u32,
         sample_rate: u32,
         mic_device_name: String,
         mic_device_kind: super::device_detection::InputDeviceKind,
@@ -801,7 +800,7 @@ impl AudioPipeline {
             ContinuousVadProcessor::new_with_max_segment_duration(
                 sample_rate,
                 redemption_time,
-                Some(ASSISTANT_LIVE_CHECKPOINT_MS),
+                Some(live_checkpoint_ms),
             )
             .unwrap_or_else(|error| panic!("VAD processor creation failed: {error}"))
         };
@@ -809,15 +808,12 @@ impl AudioPipeline {
         let system_vad_processor = create_vad_processor();
         info!(
             "Source-separated VAD pipeline: natural speech boundaries with a {}ms live checkpoint",
-            ASSISTANT_LIVE_CHECKPOINT_MS
+            live_checkpoint_ms
         );
 
         // Initialize professional audio mixing components
         let ring_buffer = AudioMixerRingBuffer::new(sample_rate);
         let mixer = ProfessionalAudioMixer::new(sample_rate);
-
-        // Note: target_chunk_duration_ms is ignored - VAD controls segmentation now
-        let _ = target_chunk_duration_ms;
 
         Self {
             receiver,
@@ -1097,7 +1093,7 @@ impl AudioPipelineManager {
         state: Arc<RecordingState>,
         transcription_sender: mpsc::UnboundedSender<AudioChunk>,
         source_activity_sender: mpsc::UnboundedSender<SourceActivityEvent>,
-        target_chunk_duration_ms: u32,
+        live_checkpoint_ms: u32,
         sample_rate: u32,
         recording_sender: Option<mpsc::UnboundedSender<AudioChunk>>,
         mic_device_name: String,
@@ -1128,7 +1124,7 @@ impl AudioPipelineManager {
             transcription_sender,
             source_activity_sender,
             state.clone(),
-            target_chunk_duration_ms,
+            live_checkpoint_ms,
             sample_rate,
             mic_device_name,
             mic_device_kind,
