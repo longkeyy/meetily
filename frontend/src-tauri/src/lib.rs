@@ -36,6 +36,7 @@ pub(crate) use perf_trace;
 
 // Declare audio module
 pub mod analytics;
+pub mod assistant;
 pub mod api;
 pub mod audio;
 pub mod config;
@@ -563,6 +564,8 @@ pub fn run() {
             analytics::commands::track_analytics_enabled,
             analytics::commands::track_analytics_disabled,
             analytics::commands::track_analytics_transparency_viewed,
+            assistant::commands::api_generate_assistant_suggestion,
+            assistant::commands::api_cancel_assistant_suggestion,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,
