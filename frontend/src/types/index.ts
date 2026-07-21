@@ -6,6 +6,34 @@ export interface Message {
 
 export type TranscriptSource = 'mic' | 'system';
 
+export interface SourceActivityEvent {
+  source: TranscriptSource;
+  active: boolean;
+  timestamp: number;
+}
+
+export interface AssistantTranscript {
+  source: TranscriptSource;
+  text: string;
+  audioStartTime: number;
+  audioEndTime: number;
+}
+
+export interface AssistantSuggestionRequest {
+  requestId: string;
+  profile: 'interview';
+  trigger: 'periodic' | 'turnEnd' | 'manual';
+  focusStartTime?: number;
+  transcripts: AssistantTranscript[];
+}
+
+export interface AssistantSuggestionResponse {
+  requestId: string;
+  profile: 'interview';
+  trigger: 'periodic' | 'turnEnd' | 'manual';
+  suggestion: string;
+}
+
 export interface Transcript {
   id: string;
   text: string;

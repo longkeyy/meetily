@@ -192,7 +192,10 @@ pub async fn generate_summary(
                     .parse()
                     .map_err(|_| "Invalid anthropic version".to_string())?,
             );
-            ("https://api.anthropic.com/v1/messages".to_string(), header_map)
+            (
+                "https://api.anthropic.com/v1/messages".to_string(),
+                header_map,
+            )
         }
         LLMProvider::BuiltInAI => {
             // This case is handled earlier with early returns
@@ -218,13 +221,6 @@ pub async fn generate_summary(
 
     // Build request body based on provider
     let request_body = if provider != &LLMProvider::Claude {
-        // For CustomOpenAI, apply optional parameters if provided
-        let (max_tokens_val, temperature_val, top_p_val) = if provider == &LLMProvider::CustomOpenAI {
-            (max_tokens, temperature, top_p)
-        } else {
-            (None, None, None)
-        };
-
         serde_json::json!(ChatRequest {
             model: model_name.to_string(),
             messages: vec![
@@ -237,15 +233,15 @@ pub async fn generate_summary(
                     content: user_prompt.to_string(),
                 }
             ],
-            max_tokens: max_tokens_val,
-            temperature: temperature_val,
-            top_p: top_p_val,
+            max_tokens,
+            temperature,
+            top_p,
         })
     } else {
         serde_json::json!(ClaudeRequest {
             system: system_prompt.to_string(),
             model: model_name.to_string(),
-            max_tokens: 2048,
+            max_tokens: max_tokens.unwrap_or(2048),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: user_prompt.to_string(),
@@ -253,7 +249,11 @@ pub async fn generate_summary(
         })
     };
 
-    info!("🐞 LLM Request to {}: model={}", provider_name(provider), model_name);
+    info!(
+        "🐞 LLM Request to {}: model={}",
+        provider_name(provider),
+        model_name
+    );
 
     // Send request with timeout and cancellation support
     let request_future = client
