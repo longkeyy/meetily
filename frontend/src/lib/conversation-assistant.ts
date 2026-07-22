@@ -2,6 +2,70 @@ export type AssistantProfile = 'interview';
 export type SuggestionTrigger = 'periodic' | 'turnEnd' | 'manual';
 export type AssistantStatus = 'disabled' | 'waiting' | 'listening' | 'speaking' | 'generating' | 'ready' | 'error';
 
+export interface AssistantTriggerCheckpoint {
+  trigger: SuggestionTrigger;
+  focusStartTime: number;
+  targetEndTime: number;
+}
+
+export interface ReadyAssistantTrigger {
+  trigger: AssistantTriggerCheckpoint;
+  remaining: AssistantTriggerCheckpoint[];
+}
+
+export function periodicSuggestionTrigger(
+  turnStartTime: number,
+  targetEndTime: number,
+): AssistantTriggerCheckpoint {
+  return {
+    trigger: 'periodic',
+    focusStartTime: turnStartTime,
+    targetEndTime,
+  };
+}
+
+export function turnEndSuggestionTrigger(
+  turnStartTime: number,
+  turnEndTime: number,
+): AssistantTriggerCheckpoint {
+  return {
+    trigger: 'turnEnd',
+    focusStartTime: turnStartTime,
+    targetEndTime: turnEndTime,
+  };
+}
+
+export function enqueueSuggestionTrigger(
+  pending: AssistantTriggerCheckpoint[],
+  next: AssistantTriggerCheckpoint,
+): AssistantTriggerCheckpoint[] {
+  if (next.trigger === 'turnEnd') return [next];
+  if (pending.some((item) => item.trigger === next.trigger && item.targetEndTime === next.targetEndTime)) {
+    return pending;
+  }
+  return [...pending, next].sort((left, right) => left.targetEndTime - right.targetEndTime);
+}
+
+export function takeReadySuggestionTrigger(
+  pending: AssistantTriggerCheckpoint[],
+  latestSystemEnd: number,
+  coverageToleranceSeconds: number,
+  allowIncomplete = false,
+): ReadyAssistantTrigger | null {
+  const ready = pending.filter((item) => {
+    const hasTranscript = latestSystemEnd >= item.focusStartTime;
+    const hasCoverage = latestSystemEnd >= item.targetEndTime - coverageToleranceSeconds;
+    return hasTranscript && (hasCoverage || allowIncomplete);
+  });
+  const trigger = ready.at(-1);
+  if (!trigger) return null;
+
+  return {
+    trigger,
+    remaining: pending.filter((item) => item.targetEndTime > trigger.targetEndTime),
+  };
+}
+
 export interface AssistantState {
   enabled: boolean;
   profile: AssistantProfile;

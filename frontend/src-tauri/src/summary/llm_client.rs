@@ -25,6 +25,8 @@ pub struct ChatRequest {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 // Generic structure for OpenAI-compatible API chat responses
@@ -88,6 +90,49 @@ impl LLMProvider {
             "custom-openai" => Ok(Self::CustomOpenAI),
             _ => Err(format!("Unsupported LLM provider: {}", s)),
         }
+    }
+}
+
+fn ollama_chat_completions_url(endpoint: Option<&str>) -> String {
+    let host = endpoint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("http://localhost:11434")
+        .trim_end_matches('/');
+    if host.ends_with("/v1") {
+        format!("{host}/chat/completions")
+    } else {
+        format!("{host}/v1/chat/completions")
+    }
+}
+
+fn build_chat_request(
+    provider: &LLMProvider,
+    model_name: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+) -> ChatRequest {
+    ChatRequest {
+        model: model_name.to_string(),
+        messages: vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: user_prompt.to_string(),
+            },
+        ],
+        max_tokens,
+        temperature,
+        top_p,
+        // Ollama enables reasoning by default for thinking models. The assistant
+        // needs the bounded token budget for the actual response, not a hidden trace.
+        reasoning_effort: (provider == &LLMProvider::Ollama).then(|| "none".to_string()),
     }
 }
 
@@ -161,15 +206,10 @@ pub async fn generate_summary(
             "https://openrouter.ai/api/v1/chat/completions".to_string(),
             header::HeaderMap::new(),
         ),
-        LLMProvider::Ollama => {
-            let host = ollama_endpoint
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "http://localhost:11434".to_string());
-            (
-                format!("{}/v1/chat/completions", host),
-                header::HeaderMap::new(),
-            )
-        }
+        LLMProvider::Ollama => (
+            ollama_chat_completions_url(ollama_endpoint),
+            header::HeaderMap::new(),
+        ),
         LLMProvider::CustomOpenAI => {
             let endpoint = custom_openai_endpoint
                 .ok_or_else(|| "Custom OpenAI endpoint not configured".to_string())?;
@@ -205,9 +245,14 @@ pub async fn generate_summary(
 
     // Add authorization header for non-Claude providers
     if provider != &LLMProvider::Claude {
+        let authorization_key = if provider == &LLMProvider::Ollama && api_key.trim().is_empty() {
+            "ollama"
+        } else {
+            api_key
+        };
         headers.insert(
             header::AUTHORIZATION,
-            format!("Bearer {}", api_key)
+            format!("Bearer {}", authorization_key)
                 .parse()
                 .map_err(|_| "Invalid authorization header".to_string())?,
         );
@@ -221,22 +266,15 @@ pub async fn generate_summary(
 
     // Build request body based on provider
     let request_body = if provider != &LLMProvider::Claude {
-        serde_json::json!(ChatRequest {
-            model: model_name.to_string(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: user_prompt.to_string(),
-                }
-            ],
+        serde_json::json!(build_chat_request(
+            provider,
+            model_name,
+            system_prompt,
+            user_prompt,
             max_tokens,
             temperature,
             top_p,
-        })
+        ))
     } else {
         serde_json::json!(ClaudeRequest {
             system: system_prompt.to_string(),
@@ -342,5 +380,55 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ollama_request_disables_reasoning_to_preserve_the_answer_budget() {
+        let request = build_chat_request(
+            &LLMProvider::Ollama,
+            "gemma4:e2b",
+            "System prompt",
+            "User prompt",
+            Some(160),
+            Some(0.35),
+            Some(0.9),
+        );
+        let value = serde_json::to_value(request).unwrap();
+
+        assert_eq!(value["reasoning_effort"], "none");
+        assert_eq!(value["max_tokens"], 160);
+    }
+
+    #[test]
+    fn non_ollama_request_does_not_send_ollama_reasoning_controls() {
+        let request = build_chat_request(
+            &LLMProvider::OpenAI,
+            "gpt-4o",
+            "System prompt",
+            "User prompt",
+            Some(160),
+            None,
+            None,
+        );
+        let value = serde_json::to_value(request).unwrap();
+
+        assert!(value.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn ollama_endpoint_accepts_host_or_v1_base_url() {
+        assert_eq!(
+            ollama_chat_completions_url(None),
+            "http://localhost:11434/v1/chat/completions"
+        );
+        assert_eq!(
+            ollama_chat_completions_url(Some("http://remote:11434/v1/")),
+            "http://remote:11434/v1/chat/completions"
+        );
     }
 }

@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
   assistantReducer,
+  enqueueSuggestionTrigger,
   initialAssistantState,
+  periodicSuggestionTrigger,
+  takeReadySuggestionTrigger,
+  turnEndSuggestionTrigger,
 } from '../../src/lib/conversation-assistant';
 
 describe('conversation assistant state', () => {
@@ -85,5 +89,43 @@ describe('conversation assistant state', () => {
     expect(state.enabled).toBe(true);
     expect(state.suggestion).toBeNull();
     expect(state.status).toBe('waiting');
+  });
+});
+
+describe('conversation assistant trigger schedule', () => {
+  test('refreshes cumulatively at 30 and 60 seconds', () => {
+    let pending = enqueueSuggestionTrigger([], periodicSuggestionTrigger(0, 30));
+    const first = takeReadySuggestionTrigger(pending, 30, 1.5);
+    expect(first?.trigger).toEqual({
+      trigger: 'periodic',
+      focusStartTime: 0,
+      targetEndTime: 30,
+    });
+
+    pending = enqueueSuggestionTrigger(first?.remaining ?? [], periodicSuggestionTrigger(0, 60));
+    const second = takeReadySuggestionTrigger(pending, 60, 1.5);
+    expect(second?.trigger).toEqual({
+      trigger: 'periodic',
+      focusStartTime: 0,
+      targetEndTime: 60,
+    });
+  });
+
+  test('turn end supersedes an unconsumed checkpoint and refreshes at 70 seconds', () => {
+    let pending = enqueueSuggestionTrigger([], periodicSuggestionTrigger(0, 60));
+    pending = enqueueSuggestionTrigger(pending, turnEndSuggestionTrigger(0, 70));
+
+    expect(pending).toHaveLength(1);
+    expect(takeReadySuggestionTrigger(pending, 70, 1.5)?.trigger).toEqual({
+      trigger: 'turnEnd',
+      focusStartTime: 0,
+      targetEndTime: 70,
+    });
+  });
+
+  test('keeps a delayed checkpoint until transcript coverage arrives', () => {
+    const pending = enqueueSuggestionTrigger([], periodicSuggestionTrigger(10, 40));
+    expect(takeReadySuggestionTrigger(pending, 35, 1.5)).toBeNull();
+    expect(takeReadySuggestionTrigger(pending, 39, 1.5)?.trigger.targetEndTime).toBe(40);
   });
 });

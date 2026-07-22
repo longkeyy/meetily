@@ -159,6 +159,11 @@ async fn load_llm_config<R: Runtime>(
         }
         api_key = custom.api_key.unwrap_or_default();
         custom_openai_endpoint = Some(custom.endpoint);
+    } else if provider == LLMProvider::Ollama {
+        api_key = SettingsRepository::get_api_key(pool, &provider_name)
+            .await
+            .map_err(|error| format!("Failed to read the assistant Ollama API key: {error}"))?
+            .unwrap_or_default();
     } else if !matches!(&provider, LLMProvider::Ollama | LLMProvider::BuiltInAI) {
         api_key = SettingsRepository::get_api_key(pool, &provider_name)
             .await

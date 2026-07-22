@@ -4,9 +4,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { Transcript, SourceActivityEvent, AssistantSuggestionRequest, AssistantSuggestionResponse } from '@/types';
 import {
   assistantReducer,
+  AssistantTriggerCheckpoint,
   AssistantState,
+  enqueueSuggestionTrigger,
   initialAssistantState,
+  periodicSuggestionTrigger,
   SuggestionTrigger,
+  takeReadySuggestionTrigger,
+  turnEndSuggestionTrigger,
 } from '@/lib/conversation-assistant';
 import { assistantSettingsService } from '@/services/assistantSettingsService';
 import {
@@ -21,12 +26,6 @@ const FINAL_TRANSCRIPT_WAIT_MS = 10_000;
 const TRANSCRIPT_COVERAGE_TOLERANCE_SECONDS = 1.5;
 const HISTORY_WINDOW_SECONDS = 10 * 60;
 const MAX_TRANSCRIPTS = 200;
-
-interface PendingTrigger {
-  trigger: SuggestionTrigger;
-  focusStartTime: number;
-  targetEndTime: number;
-}
 
 interface UseConversationAssistantOptions {
   isRecording: boolean;
@@ -63,7 +62,7 @@ export function useConversationAssistant({
   const speakerTurnStartRef = useRef<number | null>(null);
   const requestCounterRef = useRef(0);
   const activeRequestIdRef = useRef<string | null>(null);
-  const pendingTriggerRef = useRef<PendingTrigger | null>(null);
+  const pendingTriggersRef = useRef<AssistantTriggerCheckpoint[]>([]);
   const periodicTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finalWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,7 +118,7 @@ export function useConversationAssistant({
   }, []);
 
   const clearPendingWork = useCallback(() => {
-    pendingTriggerRef.current = null;
+    pendingTriggersRef.current = [];
     clearTimer(periodicTimerRef);
     clearTimer(turnEndTimerRef);
     clearTimer(finalWaitTimerRef);
@@ -196,20 +195,23 @@ export function useConversationAssistant({
   }, [assistantTranscripts, isPaused, isRecording]);
 
   const tryRunPendingTrigger = useCallback((allowIncomplete = false) => {
-    const pending = pendingTriggerRef.current;
-    if (!pending || micActiveRef.current || !stateRef.current.enabled) return;
+    if (pendingTriggersRef.current.length === 0 || micActiveRef.current || !stateRef.current.enabled) return;
 
     const latestSystemEnd = transcriptsRef.current.reduce((latest, transcript) => {
       if (transcript.source !== 'system' || transcript.audio_end_time === undefined) return latest;
       return Math.max(latest, transcript.audio_end_time);
     }, 0);
-    const hasCoverage = latestSystemEnd >= pending.targetEndTime - TRANSCRIPT_COVERAGE_TOLERANCE_SECONDS;
-    if (!hasCoverage && !allowIncomplete) return;
-    if (latestSystemEnd < pending.focusStartTime) return;
+    const ready = takeReadySuggestionTrigger(
+      pendingTriggersRef.current,
+      latestSystemEnd,
+      TRANSCRIPT_COVERAGE_TOLERANCE_SECONDS,
+      allowIncomplete,
+    );
+    if (!ready) return;
 
-    pendingTriggerRef.current = null;
+    pendingTriggersRef.current = ready.remaining;
     clearTimer(finalWaitTimerRef);
-    void generateSuggestion(pending.trigger, pending.focusStartTime);
+    void generateSuggestion(ready.trigger.trigger, ready.trigger.focusStartTime);
   }, [clearTimer, generateSuggestion]);
 
   useEffect(() => {
@@ -225,11 +227,10 @@ export function useConversationAssistant({
       periodicTimerRef.current = setTimeout(() => {
         periodicTimerRef.current = null;
         if (!speakerActiveRef.current || micActiveRef.current || !stateRef.current.enabled) return;
-        pendingTriggerRef.current = {
-          trigger: 'periodic',
-          focusStartTime: targetEndTime - intervalSeconds,
-          targetEndTime,
-        };
+        pendingTriggersRef.current = enqueueSuggestionTrigger(
+          pendingTriggersRef.current,
+          periodicSuggestionTrigger(turnStartTime, targetEndTime),
+        );
         tryRunPendingTrigger();
         targetEndTime += intervalSeconds;
         scheduleNext();
@@ -243,18 +244,17 @@ export function useConversationAssistant({
     clearTimer(periodicTimerRef);
     if (micActiveRef.current || !stateRef.current.enabled) {
       speakerTurnStartRef.current = null;
-      pendingTriggerRef.current = null;
+      pendingTriggersRef.current = [];
       return;
     }
 
     const turnStartTime = speakerTurnStartRef.current
       ?? Math.max(0, turnEndTime - settingsRef.current.intervalSeconds);
     speakerTurnStartRef.current = null;
-    pendingTriggerRef.current = {
-      trigger: 'turnEnd',
-      focusStartTime: turnStartTime,
-      targetEndTime: turnEndTime,
-    };
+    pendingTriggersRef.current = enqueueSuggestionTrigger(
+      pendingTriggersRef.current,
+      turnEndSuggestionTrigger(turnStartTime, turnEndTime),
+    );
     tryRunPendingTrigger();
     clearTimer(finalWaitTimerRef);
     finalWaitTimerRef.current = setTimeout(
@@ -287,7 +287,6 @@ export function useConversationAssistant({
       dispatch({ type: 'sourceActivity', source: 'system', active: activity.active });
       if (activity.active) {
         clearTimer(turnEndTimerRef);
-        pendingTriggerRef.current = null;
         const isNewTurn = speakerTurnStartRef.current === null;
         if (isNewTurn) {
           speakerTurnStartRef.current = activity.timestamp;
