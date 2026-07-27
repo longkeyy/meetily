@@ -96,7 +96,8 @@ export function RetranscribeDialog({
     const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find(m => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
-  const usesAutomaticLanguage = selectedModelDetails?.provider === 'parakeet';
+  const usesAutomaticLanguage = selectedModelDetails?.provider === 'parakeet'
+    || selectedModelDetails?.provider === 'senseVoice';
   const languageCapability = useMemo(
     () => getTranscriptionLanguageCapability(
       selectedModelDetails?.provider,

@@ -135,7 +135,7 @@ pnpm install
 
 ### 🎯 Local Transcription
 
-Transcribe meetings entirely on your device using **Whisper**, **Parakeet**, or **Qwen3-ASR** models. No cloud required.
+Transcribe meetings entirely on your device using **Whisper**, **Parakeet**, **Qwen3-ASR**, or **SenseVoice** models. No cloud required.
 
 <p align="center">
     <img src="docs/home.png" width="650" style="border-radius: 10px;" alt="Meetily Demo" />
@@ -266,6 +266,7 @@ MIT License - Feel free to use this project for your own purposes.
 - Thanks to **NVIDIA** for developing the **Parakeet** model.
 - Thanks to [istupakov](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) for providing the **ONNX conversion** of the Parakeet model.
 - See [Third-Party Model Notices](THIRD_PARTY_MODELS.md) for downloadable model sources and license terms.
+- Thanks to [FunAudioLLM](https://github.com/FunAudioLLM/SenseVoice) and the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) maintainers for **SenseVoice** and its ONNX runtime support.
 
 ## Star History
 

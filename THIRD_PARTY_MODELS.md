@@ -40,3 +40,16 @@ Attribution: Qwen3-ASR was developed by the Qwen team. The ONNX export was produ
 The community ONNX repository does not publish a model card or separate license metadata. Meetily pins and verifies every downloaded file, but distributors should independently review the conversion artifact provenance and terms before shipping this optional download.
 
 Attribution: Qwen3-ASR was developed by the Qwen team. The sherpa-onnx-compatible 1.7B export is hosted by the `ilmina` Hugging Face account.
+
+## SenseVoiceSmall Int8 ONNX
+
+- Meetily model identifier: `sense-voice-small-int8`
+- ONNX artifacts: [csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17)
+- Pinned revision: `2365baeacb507f821a0c8120fcee3d484dba7a07`
+- Original model: [FunAudioLLM/SenseVoiceSmall](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)
+- Model license: [FunASR Model Open Source License Agreement 1.1](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE_AGREEMENT)
+- Runtime: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), Apache License 2.0
+
+The model is downloaded only when the user requests it. Its upstream `LICENSE` reference is retained in the downloaded model directory. Meetily configures automatic language recognition and inverse text normalization for Mandarin Chinese, Cantonese, English, Japanese, and Korean.
+
+Attribution: SenseVoice was developed by the FunAudioLLM team. The quantized ONNX artifacts were prepared and published by the sherpa-onnx maintainers.

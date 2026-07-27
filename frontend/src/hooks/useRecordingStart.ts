@@ -15,6 +15,12 @@ interface UseRecordingStartReturn {
   isAutoStarting: boolean;
 }
 
+const EMBEDDED_MODEL_COMMANDS: Record<string, { init: string; list: string }> = {
+  parakeet: { init: 'parakeet_init', list: 'parakeet_get_available_models' },
+  qwen3Asr: { init: 'qwen_asr_init', list: 'qwen_asr_get_available_models' },
+  senseVoice: { init: 'sense_voice_init', list: 'sense_voice_get_available_models' },
+};
+
 /**
  * Custom hook for managing recording start lifecycle.
  * Handles both manual start (button click) and auto-start (from sidebar navigation).
@@ -52,14 +58,12 @@ export function useRecordingStart(
 
   // Check if the selected embedded transcription model is ready.
   const checkLocalModelReady = useCallback(async (): Promise<boolean> => {
-    if (transcriptModelConfig.provider !== 'parakeet' && transcriptModelConfig.provider !== 'qwen3Asr') return true;
+    const commands = EMBEDDED_MODEL_COMMANDS[transcriptModelConfig.provider];
+    if (!commands) return true;
 
     try {
-      const isQwen = transcriptModelConfig.provider === 'qwen3Asr';
-      await invoke(isQwen ? 'qwen_asr_init' : 'parakeet_init');
-      const models = await invoke<ParakeetModelInfo[]>(
-        isQwen ? 'qwen_asr_get_available_models' : 'parakeet_get_available_models'
-      );
+      await invoke(commands.init);
+      const models = await invoke<ParakeetModelInfo[]>(commands.list);
       return models.some(
         model => model.name === transcriptModelConfig.model && model.status === 'Available'
       );
@@ -71,14 +75,11 @@ export function useRecordingStart(
 
   // Check whether the selected Parakeet model is currently downloading.
   const checkIfModelDownloading = useCallback(async (): Promise<boolean> => {
-    if (transcriptModelConfig.provider !== 'parakeet' && transcriptModelConfig.provider !== 'qwen3Asr') return false;
+    const commands = EMBEDDED_MODEL_COMMANDS[transcriptModelConfig.provider];
+    if (!commands) return false;
 
     try {
-      const models = await invoke<ParakeetModelInfo[]>(
-        transcriptModelConfig.provider === 'qwen3Asr'
-          ? 'qwen_asr_get_available_models'
-          : 'parakeet_get_available_models'
-      );
+      const models = await invoke<ParakeetModelInfo[]>(commands.list);
       const isDownloading = models.some(m =>
         m.name === transcriptModelConfig.model &&
         typeof m.status === 'object' &&

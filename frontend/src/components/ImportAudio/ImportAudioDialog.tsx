@@ -173,7 +173,8 @@ export function ImportAudioDialog({
     const name = selectedModelKey.slice(colonIndex + 1);
     return availableModels.find((m) => m.provider === provider && m.name === name);
   }, [selectedModelKey, availableModels]);
-  const usesAutomaticLanguage = selectedModel?.provider === 'parakeet';
+  const usesAutomaticLanguage = selectedModel?.provider === 'parakeet'
+    || selectedModel?.provider === 'senseVoice';
   const languageCapability = useMemo(
     () => getTranscriptionLanguageCapability(selectedModel?.provider, selectedModel?.name),
     [selectedModel?.provider, selectedModel?.name]
