@@ -102,7 +102,6 @@ pub fn cancel_generation() -> bool {
 }
 
 fn register_generation(request_id: &str) -> CancellationToken {
-    crate::meeting_intelligence::service::cancel_background_generation();
     let token = CancellationToken::new();
     if let Ok(mut active) = ACTIVE_GENERATION.lock() {
         if let Some((_, previous)) = active.replace((request_id.to_string(), token.clone())) {
