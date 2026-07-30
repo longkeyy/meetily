@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { PhysicalPosition } from '@tauri-apps/api/dpi';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { Window } from '@tauri-apps/api/window';
-import { Copy, LoaderCircle, Mic2, PictureInPicture2, RefreshCw, Sparkles, Volume2 } from 'lucide-react';
+import { Copy, LoaderCircle, Mic2, RefreshCw, Sparkles, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
@@ -17,8 +18,10 @@ import type { AssistantState } from '@/lib/conversation-assistant';
 import { activeAssistantProfile } from '@/types/assistant-settings';
 import {
   REALTIME_ASSISTANT_ACTION_EVENT,
+  REALTIME_ASSISTANT_POSITION_STORAGE_KEY,
   REALTIME_ASSISTANT_STATE_EVENT,
   REALTIME_ASSISTANT_WINDOW_LABEL,
+  defaultRealtimeAssistantPosition,
 } from '@/types/realtime-assistant-overlay';
 import type {
   RealtimeAssistantSnapshot,
@@ -51,7 +54,28 @@ function formatCountdown(seconds: number): string {
   return `${minutes}:${remainder}`;
 }
 
-export function RealtimeAssistantPanel() {
+async function positionAssistantWithinMainWindow(assistantWindow: Window) {
+  if (localStorage.getItem(REALTIME_ASSISTANT_POSITION_STORAGE_KEY)) return;
+
+  const mainWindow = await Window.getByLabel('main');
+  if (!mainWindow) return;
+
+  const [mainPosition, mainSize, assistantSize, scaleFactor] = await Promise.all([
+    mainWindow.outerPosition(),
+    mainWindow.outerSize(),
+    assistantWindow.outerSize(),
+    mainWindow.scaleFactor(),
+  ]);
+  const position = defaultRealtimeAssistantPosition(
+    mainPosition,
+    mainSize,
+    assistantSize,
+    scaleFactor,
+  );
+  await assistantWindow.setPosition(new PhysicalPosition(position.x, position.y));
+}
+
+export function RealtimeAssistantController() {
   const { transcripts } = useTranscripts();
   const { isRecording, isPaused } = useRecordingState();
   const { modelConfig } = useConfig();
@@ -126,43 +150,31 @@ export function RealtimeAssistantPanel() {
     };
   }, [broadcastSnapshot, handleEnabledChange, refreshSuggestion]);
 
-  useEffect(() => () => {
+  useEffect(() => {
+    if (!isRecording) return;
+    let disposed = false;
+
     void Window.getByLabel(REALTIME_ASSISTANT_WINDOW_LABEL)
-      .then((assistantWindow) => assistantWindow?.hide());
-  }, []);
+      .then(async (assistantWindow) => {
+        if (!assistantWindow || disposed) return;
+        await positionAssistantWithinMainWindow(assistantWindow);
+        if (disposed) return;
+        await assistantWindow.show();
+        await broadcastSnapshot();
+      })
+      .catch((error) => {
+        console.error('Failed to show Realtime Assistant window:', error);
+        toast.error('Realtime Assistant window is unavailable');
+      });
 
-  if (!isRecording) return null;
+    return () => {
+      disposed = true;
+      void Window.getByLabel(REALTIME_ASSISTANT_WINDOW_LABEL)
+        .then((assistantWindow) => assistantWindow?.hide());
+    };
+  }, [broadcastSnapshot, isRecording]);
 
-  const copySuggestion = async () => {
-    if (!state.suggestion) return;
-    await navigator.clipboard.writeText(state.suggestion);
-    toast.success('Suggestion copied');
-  };
-
-  const openFloatingWindow = async () => {
-    const assistantWindow = await Window.getByLabel(REALTIME_ASSISTANT_WINDOW_LABEL);
-    if (!assistantWindow) {
-      toast.error('Realtime Assistant window is unavailable');
-      return;
-    }
-    await assistantWindow.show();
-    await assistantWindow.setFocus();
-    await broadcastSnapshot();
-  };
-
-  return (
-    <RealtimeAssistantPanelView
-      state={state}
-      profileName={activeAssistantProfile(settings).name}
-      scheduleState={scheduleState}
-      settingsReady={settingsReady}
-      hasTranscripts={transcripts.length > 0}
-      onEnabledChange={handleEnabledChange}
-      onRefresh={refreshSuggestion}
-      onCopy={copySuggestion}
-      onOpenFloating={() => void openFloatingWindow()}
-    />
-  );
+  return null;
 }
 
 interface RealtimeAssistantPanelViewProps {
@@ -174,7 +186,6 @@ interface RealtimeAssistantPanelViewProps {
   onEnabledChange: (enabled: boolean) => void;
   onRefresh: () => void;
   onCopy: () => void;
-  onOpenFloating?: () => void;
   headerActions?: ReactNode;
   onHeaderMouseDown?: React.MouseEventHandler<HTMLDivElement>;
   className?: string;
@@ -189,7 +200,6 @@ export function RealtimeAssistantPanelView({
   onEnabledChange,
   onRefresh,
   onCopy,
-  onOpenFloating,
   headerActions,
   onHeaderMouseDown,
   className,
@@ -252,23 +262,6 @@ export function RealtimeAssistantPanelView({
             </Tooltip>
           </div>
         )}
-        {onOpenFloating && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                onClick={onOpenFloating}
-              >
-                <PictureInPicture2 className="size-4" aria-hidden="true" />
-                <span className="sr-only">Open floating window</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Open floating window</TooltipContent>
-          </Tooltip>
-        )}
         {headerActions}
         <Switch
           checked={state.enabled}
@@ -302,5 +295,6 @@ export function RealtimeAssistantPanelView({
   );
 }
 
-export const InterviewAssistantPanel = RealtimeAssistantPanel;
+export const RealtimeAssistantPanel = RealtimeAssistantController;
+export const InterviewAssistantPanel = RealtimeAssistantController;
 export const InterviewAssistantPanelView = RealtimeAssistantPanelView;

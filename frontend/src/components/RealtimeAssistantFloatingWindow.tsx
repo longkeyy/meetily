@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { initialAssistantState } from '@/lib/conversation-assistant';
 import {
   REALTIME_ASSISTANT_ACTION_EVENT,
+  REALTIME_ASSISTANT_POSITION_STORAGE_KEY,
   REALTIME_ASSISTANT_STATE_EVENT,
 } from '@/types/realtime-assistant-overlay';
 import type {
@@ -20,7 +21,6 @@ import { RealtimeAssistantPanelView } from './InterviewAssistantPanel';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 const PINNED_STORAGE_KEY = 'realtimeAssistant.window.pinned';
-const POSITION_STORAGE_KEY = 'realtimeAssistant.window.position';
 
 const EMPTY_SNAPSHOT: RealtimeAssistantSnapshot = {
   state: initialAssistantState,
@@ -52,7 +52,7 @@ export function RealtimeAssistantFloatingWindow() {
       setPinned(storedPinned);
       await appWindow.setAlwaysOnTop(storedPinned);
 
-      const storedPosition = localStorage.getItem(POSITION_STORAGE_KEY);
+      const storedPosition = localStorage.getItem(REALTIME_ASSISTANT_POSITION_STORAGE_KEY);
       if (storedPosition) {
         try {
           const position = JSON.parse(storedPosition) as { x: number; y: number };
@@ -60,7 +60,7 @@ export function RealtimeAssistantFloatingWindow() {
             await appWindow.setPosition(new PhysicalPosition(position.x, position.y));
           }
         } catch {
-          localStorage.removeItem(POSITION_STORAGE_KEY);
+          localStorage.removeItem(REALTIME_ASSISTANT_POSITION_STORAGE_KEY);
         }
       }
 
@@ -75,7 +75,10 @@ export function RealtimeAssistantFloatingWindow() {
       unlistenState = disposeState;
 
       const disposeMoved = await appWindow.onMoved(({ payload }) => {
-        localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify({ x: payload.x, y: payload.y }));
+        localStorage.setItem(
+          REALTIME_ASSISTANT_POSITION_STORAGE_KEY,
+          JSON.stringify({ x: payload.x, y: payload.y }),
+        );
       });
       if (disposed) {
         disposeMoved();
