@@ -6,18 +6,6 @@ pub mod settings;
 use crate::audio::recording_state::TranscriptSource;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum AssistantProfile {
-    Interview,
-}
-
-impl Default for AssistantProfile {
-    fn default() -> Self {
-        Self::Interview
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SuggestionTrigger {
@@ -39,7 +27,7 @@ pub struct AssistantTranscript {
 #[serde(rename_all = "camelCase")]
 pub struct AssistantSuggestionRequest {
     pub request_id: String,
-    pub profile: AssistantProfile,
+    pub profile: String,
     pub trigger: SuggestionTrigger,
     pub focus_start_time: Option<f64>,
     pub transcripts: Vec<AssistantTranscript>,
@@ -49,7 +37,7 @@ pub struct AssistantSuggestionRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AssistantSuggestionResponse {
     pub request_id: String,
-    pub profile: AssistantProfile,
+    pub profile: String,
     pub trigger: SuggestionTrigger,
     pub suggestion: String,
 }
@@ -75,7 +63,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(request.request_id, "request-1");
-        assert_eq!(request.profile, AssistantProfile::Interview);
+        assert_eq!(request.profile, "interview");
         assert_eq!(request.trigger, SuggestionTrigger::TurnEnd);
         assert_eq!(request.transcripts[0].source, TranscriptSource::SystemAudio);
     }

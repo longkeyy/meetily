@@ -1,23 +1,49 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Copy, LoaderCircle, Mic2, RefreshCw, Sparkles, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useTranscripts } from '@/contexts/TranscriptContext';
-import { useConversationAssistant } from '@/hooks/useConversationAssistant';
+import {
+  AssistantScheduleState,
+  useConversationAssistant,
+} from '@/hooks/useConversationAssistant';
 import { AssistantState } from '@/lib/conversation-assistant';
+import { activeAssistantProfile } from '@/types/assistant-settings';
 import { Button } from './ui/button';
 import { Switch } from './ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 const EXTERNAL_PROVIDERS = new Set(['openai', 'claude', 'groq', 'openrouter', 'custom-openai']);
 
-export function InterviewAssistantPanel() {
+function useCountdownSeconds(deadline: number | null): number | null {
+  const [remaining, setRemaining] = useState<number | null>(null);
+  useEffect(() => {
+    if (deadline === null) {
+      setRemaining(null);
+      return;
+    }
+    const update = () => setRemaining(Math.max(0, Math.ceil((deadline - Date.now()) / 1_000)));
+    update();
+    const timer = window.setInterval(update, 250);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+  return remaining;
+}
+
+function formatCountdown(seconds: number): string {
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const remainder = (seconds % 60).toString().padStart(2, '0');
+  return `${minutes}:${remainder}`;
+}
+
+export function RealtimeAssistantPanel() {
   const { transcripts } = useTranscripts();
   const { isRecording, isPaused } = useRecordingState();
   const { modelConfig } = useConfig();
-  const { state, settings, settingsReady, setEnabled, refreshSuggestion } = useConversationAssistant({
+  const { state, settings, settingsReady, scheduleState, setEnabled, refreshSuggestion } = useConversationAssistant({
     isRecording,
     isPaused,
     transcripts,
@@ -26,13 +52,14 @@ export function InterviewAssistantPanel() {
   if (!isRecording) return null;
 
   const handleEnabledChange = (enabled: boolean) => {
-    const effectiveProvider = settings.modelMode === 'custom'
-      ? settings.provider
+    const profile = activeAssistantProfile(settings);
+    const effectiveProvider = profile.modelMode === 'custom'
+      ? profile.provider
       : modelConfig.provider;
     if (enabled && effectiveProvider && EXTERNAL_PROVIDERS.has(effectiveProvider)) {
       const acknowledgementKey = `conversationAssistant.privacyAcknowledged.${effectiveProvider}`;
       if (localStorage.getItem(acknowledgementKey) !== 'true') {
-        toast.info('Interview Assistant enabled', {
+        toast.info('Realtime Assistant enabled', {
           description: `Live transcript context will be sent to the configured ${effectiveProvider} provider.`,
           duration: 7000,
         });
@@ -49,8 +76,10 @@ export function InterviewAssistantPanel() {
   };
 
   return (
-    <InterviewAssistantPanelView
+    <RealtimeAssistantPanelView
       state={state}
+      profileName={activeAssistantProfile(settings).name}
+      scheduleState={scheduleState}
       settingsReady={settingsReady}
       hasTranscripts={transcripts.length > 0}
       onEnabledChange={handleEnabledChange}
@@ -60,8 +89,10 @@ export function InterviewAssistantPanel() {
   );
 }
 
-interface InterviewAssistantPanelViewProps {
+interface RealtimeAssistantPanelViewProps {
   state: AssistantState;
+  profileName: string;
+  scheduleState: AssistantScheduleState;
   settingsReady: boolean;
   hasTranscripts: boolean;
   onEnabledChange: (enabled: boolean) => void;
@@ -69,21 +100,28 @@ interface InterviewAssistantPanelViewProps {
   onCopy: () => void;
 }
 
-export function InterviewAssistantPanelView({
+export function RealtimeAssistantPanelView({
   state,
+  profileName,
+  scheduleState,
   settingsReady,
   hasTranscripts,
   onEnabledChange,
   onRefresh,
   onCopy,
-}: InterviewAssistantPanelViewProps) {
+}: RealtimeAssistantPanelViewProps) {
+  const countdown = useCountdownSeconds(scheduleState.nextSuggestionAt);
   const status = state.micActive
     ? { icon: Mic2, label: 'Listening to you' }
     : state.status === 'generating'
-      ? { icon: LoaderCircle, label: 'Preparing response' }
-      : state.speakerActive
-        ? { icon: Volume2, label: 'Listening to interviewer' }
-        : { icon: Sparkles, label: state.suggestion ? 'Suggested response' : 'Waiting for interviewer' };
+      ? { icon: LoaderCircle, label: 'Generating suggestion' }
+      : scheduleState.waitingForTranscript
+        ? { icon: Volume2, label: 'Waiting for transcript' }
+        : state.speakerActive && countdown !== null
+          ? { icon: Volume2, label: `Next suggestion in ${formatCountdown(countdown)}` }
+          : state.speakerActive
+            ? { icon: Volume2, label: 'Listening to speaker' }
+            : { icon: Sparkles, label: 'Waiting for speaker' };
   const StatusIcon = status.icon;
 
   return (
@@ -91,8 +129,9 @@ export function InterviewAssistantPanelView({
       <div className="flex h-12 items-center gap-3 px-3">
         <Sparkles className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">
-          Interview Assistant
+          Realtime Assistant
         </span>
+        <span className="hidden max-w-40 truncate text-xs text-gray-500 sm:block">{profileName}</span>
         {state.enabled && (
           <div className="flex items-center gap-1">
             <Tooltip>
@@ -133,7 +172,7 @@ export function InterviewAssistantPanelView({
           checked={state.enabled}
           onCheckedChange={onEnabledChange}
           disabled={!settingsReady}
-          aria-label="Enable Interview Assistant"
+          aria-label="Enable Realtime Assistant"
         />
       </div>
 
@@ -147,11 +186,11 @@ export function InterviewAssistantPanelView({
             <span>{state.status === 'error' ? 'Assistant unavailable' : status.label}</span>
           </div>
           <div className="max-h-[68px] overflow-y-auto pr-1 text-sm leading-5 text-gray-800">
-            {state.suggestion ?? (
+            {state.status === 'error' && state.error ? (
+              <span className="text-red-600">{state.error}</span>
+            ) : state.suggestion ?? (
               <span className="text-gray-400">
-                {state.status === 'error'
-                  ? 'Check the configured summary model and try again.'
-                  : 'Suggestions will appear here.'}
+                Suggestions will appear here.
               </span>
             )}
           </div>
@@ -160,3 +199,6 @@ export function InterviewAssistantPanelView({
     </div>
   );
 }
+
+export const InterviewAssistantPanel = RealtimeAssistantPanel;
+export const InterviewAssistantPanelView = RealtimeAssistantPanelView;

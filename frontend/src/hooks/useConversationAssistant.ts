@@ -18,6 +18,7 @@ import {
   AssistantSettings,
   AssistantSettingsUpdate,
   FALLBACK_ASSISTANT_SETTINGS,
+  activeAssistantProfile,
 } from '@/types/assistant-settings';
 
 const ENABLED_STORAGE_KEY = 'conversationAssistant.interview.enabled';
@@ -36,15 +37,14 @@ interface UseConversationAssistantOptions {
 function toSettingsUpdate(settings: AssistantSettings): AssistantSettingsUpdate {
   return {
     enabledByDefault: settings.enabledByDefault,
-    profile: settings.profile,
-    intervalSeconds: settings.intervalSeconds,
-    modelMode: settings.modelMode,
-    provider: settings.modelMode === 'custom' ? settings.provider : null,
-    model: settings.modelMode === 'custom' ? settings.model : null,
-    customOpenAIBaseUrl: settings.modelMode === 'custom' ? settings.customOpenAIBaseUrl : null,
-    customOpenAIApiKey: settings.modelMode === 'custom' ? settings.customOpenAIApiKey : null,
-    systemPrompt: settings.systemPrompt,
+    activeProfileId: settings.activeProfileId,
+    profiles: settings.profiles.map(({ defaultSystemPrompt: _, ...profile }) => profile),
   };
+}
+
+export interface AssistantScheduleState {
+  nextSuggestionAt: number | null;
+  waitingForTranscript: boolean;
 }
 
 export function useConversationAssistant({
@@ -55,6 +55,10 @@ export function useConversationAssistant({
   const [state, dispatch] = useReducer(assistantReducer, initialAssistantState);
   const [assistantSettings, setAssistantSettings] = useState(FALLBACK_ASSISTANT_SETTINGS);
   const [settingsReady, setSettingsReady] = useState(false);
+  const [scheduleState, setScheduleState] = useState<AssistantScheduleState>({
+    nextSuggestionAt: null,
+    waitingForTranscript: false,
+  });
 
   const stateRef = useRef(state);
   const settingsRef = useRef(FALLBACK_ASSISTANT_SETTINGS);
@@ -97,7 +101,7 @@ export function useConversationAssistant({
       dispatch({
         type: 'settingsLoaded',
         enabled: resolved.enabledByDefault,
-        profile: resolved.profile,
+        profile: resolved.activeProfileId,
       });
     }).catch((error) => {
       console.error('Failed to load assistant settings:', error);
@@ -122,6 +126,7 @@ export function useConversationAssistant({
 
   const clearPendingWork = useCallback(() => {
     pendingTriggersRef.current = [];
+    setScheduleState({ nextSuggestionAt: null, waitingForTranscript: false });
     clearTimer(periodicTimerRef);
     clearTimer(turnEndTimerRef);
     clearTimer(finalWaitTimerRef);
@@ -166,12 +171,13 @@ export function useConversationAssistant({
     const requestId = `${Date.now()}-${++requestCounterRef.current}`;
     const request: AssistantSuggestionRequest = {
       requestId,
-      profile: settingsRef.current.profile,
+      profile: settingsRef.current.activeProfileId,
       trigger,
       focusStartTime,
       transcripts: context,
     };
     activeRequestIdRef.current = requestId;
+    setScheduleState((current) => ({ ...current, waitingForTranscript: false }));
     dispatch({ type: 'generationStarted', requestId });
 
     try {
@@ -210,9 +216,13 @@ export function useConversationAssistant({
       TRANSCRIPT_COVERAGE_TOLERANCE_SECONDS,
       allowIncomplete,
     );
-    if (!ready) return;
+    if (!ready) {
+      setScheduleState((current) => ({ ...current, waitingForTranscript: true }));
+      return;
+    }
 
     pendingTriggersRef.current = ready.remaining;
+    setScheduleState((current) => ({ ...current, waitingForTranscript: false }));
     clearTimer(finalWaitTimerRef);
     void generateSuggestion(ready.trigger.trigger, ready.trigger.focusStartTime);
   }, [clearTimer, generateSuggestion]);
@@ -223,7 +233,7 @@ export function useConversationAssistant({
 
   const schedulePeriodicTrigger = useCallback((turnStartTime: number) => {
     clearTimer(periodicTimerRef);
-    const intervalSeconds = settingsRef.current.intervalSeconds;
+    const intervalSeconds = activeAssistantProfile(settingsRef.current).intervalSeconds;
     const wallStart = speakerTurnWallStartRef.current ?? Date.now();
     speakerTurnWallStartRef.current = wallStart;
     const elapsedSeconds = Math.max(0, (Date.now() - wallStart) / 1_000);
@@ -235,9 +245,18 @@ export function useConversationAssistant({
       const targetEndTime = turnStartTime + checkpointIndex * intervalSeconds;
       const targetWallTime = wallStart + checkpointIndex * intervalSeconds * 1_000;
       const delayMs = Math.max(0, targetWallTime - Date.now());
+      setScheduleState((current) => ({
+        ...current,
+        nextSuggestionAt: targetWallTime,
+      }));
       periodicTimerRef.current = setTimeout(() => {
         periodicTimerRef.current = null;
         if (!speakerActiveRef.current || micActiveRef.current || !stateRef.current.enabled) return;
+        setScheduleState((current) => ({
+          ...current,
+          nextSuggestionAt: null,
+          waitingForTranscript: true,
+        }));
         pendingTriggersRef.current = enqueueSuggestionTrigger(
           pendingTriggersRef.current,
           periodicSuggestionTrigger(turnStartTime, targetEndTime),
@@ -253,6 +272,7 @@ export function useConversationAssistant({
 
   const completeSpeakerTurn = useCallback((turnEndTime: number) => {
     clearTimer(periodicTimerRef);
+    setScheduleState((current) => ({ ...current, nextSuggestionAt: null }));
     if (micActiveRef.current || !stateRef.current.enabled) {
       speakerTurnStartRef.current = null;
       speakerTurnWallStartRef.current = null;
@@ -261,13 +281,14 @@ export function useConversationAssistant({
     }
 
     const turnStartTime = speakerTurnStartRef.current
-      ?? Math.max(0, turnEndTime - settingsRef.current.intervalSeconds);
+      ?? Math.max(0, turnEndTime - activeAssistantProfile(settingsRef.current).intervalSeconds);
     speakerTurnStartRef.current = null;
     speakerTurnWallStartRef.current = null;
     pendingTriggersRef.current = enqueueSuggestionTrigger(
       pendingTriggersRef.current,
       turnEndSuggestionTrigger(turnStartTime, turnEndTime),
     );
+    setScheduleState((current) => ({ ...current, waitingForTranscript: true }));
     tryRunPendingTrigger();
     clearTimer(finalWaitTimerRef);
     finalWaitTimerRef.current = setTimeout(
@@ -283,17 +304,18 @@ export function useConversationAssistant({
       const updated = event.payload;
       settingsRef.current = updated;
       setAssistantSettings(updated);
-      pendingTriggersRef.current = [];
+      clearPendingWork();
+      cancelGeneration();
       dispatch({
         type: 'settingsLoaded',
         enabled: updated.enabledByDefault,
-        profile: updated.profile,
+        profile: updated.activeProfileId,
       });
 
-      if (!updated.enabledByDefault) {
-        clearPendingWork();
-        cancelGeneration();
-      } else if (speakerActiveRef.current && !micActiveRef.current && speakerTurnStartRef.current !== null) {
+      if (updated.enabledByDefault
+        && speakerActiveRef.current
+        && !micActiveRef.current
+        && speakerTurnStartRef.current !== null) {
         schedulePeriodicTrigger(speakerTurnStartRef.current);
       }
     }).then((dispose) => {
@@ -320,7 +342,7 @@ export function useConversationAssistant({
         dispatch({
           type: 'settingsLoaded',
           enabled: updated.enabledByDefault,
-          profile: updated.profile,
+          profile: updated.activeProfileId,
         });
         if (updated.enabledByDefault && speakerActiveRef.current && !micActiveRef.current && speakerTurnStartRef.current !== null) {
           schedulePeriodicTrigger(speakerTurnStartRef.current);
@@ -447,7 +469,7 @@ export function useConversationAssistant({
     );
     void generateSuggestion(
       'manual',
-      Math.max(0, latestTime - settingsRef.current.intervalSeconds),
+      Math.max(0, latestTime - activeAssistantProfile(settingsRef.current).intervalSeconds),
     );
   }, [generateSuggestion]);
 
@@ -455,6 +477,7 @@ export function useConversationAssistant({
     state,
     settings: assistantSettings,
     settingsReady,
+    scheduleState,
     setEnabled,
     refreshSuggestion,
   };

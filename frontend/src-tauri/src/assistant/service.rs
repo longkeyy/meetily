@@ -1,5 +1,5 @@
 use super::{
-    settings::{load_assistant_settings, AssistantModelMode, AssistantSettings},
+    settings::{load_assistant_settings, AssistantModelMode},
     AssistantSuggestionRequest, AssistantSuggestionResponse, AssistantTranscript,
     SuggestionTrigger,
 };
@@ -48,8 +48,11 @@ pub async fn generate_suggestion<R: Runtime>(
     let cancellation_token = register_generation(&request.request_id);
     let result = async {
         let assistant_settings = load_assistant_settings(app).await;
-        let config = load_llm_config(app, pool, &assistant_settings).await?;
-        let system_prompt = assistant_settings.resolved_system_prompt(request.profile);
+        let profile = assistant_settings
+            .profile(&request.profile)
+            .ok_or_else(|| format!("Assistant profile '{}' no longer exists", request.profile))?;
+        let config = load_llm_config(app, pool, profile).await?;
+        let system_prompt = profile.system_prompt.clone();
         let user_prompt = build_user_prompt(request.trigger, &context);
         let client = Client::new();
 
@@ -99,7 +102,6 @@ pub fn cancel_generation() -> bool {
 }
 
 fn register_generation(request_id: &str) -> CancellationToken {
-    crate::meeting_intelligence::service::cancel_background_generation();
     let token = CancellationToken::new();
     if let Ok(mut active) = ACTIVE_GENERATION.lock() {
         if let Some((_, previous)) = active.replace((request_id.to_string(), token.clone())) {
@@ -123,21 +125,21 @@ fn cleanup_generation(request_id: &str) {
 async fn load_llm_config<R: Runtime>(
     app: &AppHandle<R>,
     pool: &SqlitePool,
-    assistant_settings: &AssistantSettings,
+    profile: &super::settings::AssistantProfileSettings,
 ) -> Result<LlmRuntimeConfig, String> {
     let setting = SettingsRepository::get_model_config(pool)
         .await
         .map_err(|error| format!("Failed to read model provider configuration: {error}"))?
         .ok_or_else(|| "Configure a model provider before enabling the assistant".to_string())?;
-    let (provider_name, model_override) = match assistant_settings.model_mode {
+    let (provider_name, model_override) = match profile.model_mode {
         AssistantModelMode::FollowSummary => (setting.provider.clone(), None),
         AssistantModelMode::Custom => (
-            assistant_settings
+            profile
                 .provider
                 .clone()
                 .ok_or_else(|| "Assistant model provider is not configured".to_string())?,
             Some(
-                assistant_settings
+                profile
                     .model
                     .clone()
                     .ok_or_else(|| "Assistant model is not configured".to_string())?,
@@ -152,11 +154,8 @@ async fn load_llm_config<R: Runtime>(
 
     if provider == LLMProvider::CustomOpenAI {
         if model_override.is_some() {
-            custom_openai_endpoint = assistant_settings.custom_openai_base_url.clone();
-            api_key = assistant_settings
-                .custom_openai_api_key
-                .clone()
-                .unwrap_or_default();
+            custom_openai_endpoint = profile.custom_openai_base_url.clone();
+            api_key = profile.custom_openai_api_key.clone().unwrap_or_default();
         } else {
             let custom = SettingsRepository::get_custom_openai_config(pool)
                 .await
@@ -212,13 +211,13 @@ fn validate_request(request: &AssistantSuggestionRequest) -> Result<(), String> 
 fn build_user_prompt(trigger: SuggestionTrigger, context: &str) -> String {
     let focus = match trigger {
         SuggestionTrigger::Periodic => {
-            "The interviewer is still speaking. Respond to the most recent FOCUS portion without assuming the turn is complete."
+            "SPEAKER is still speaking. Suggest how MIC could respond to the most recent FOCUS portion without assuming the turn is complete."
         }
         SuggestionTrigger::TurnEnd => {
-            "The interviewer has finished this turn. Recommend the candidate's best next response."
+            "SPEAKER has finished this turn. Recommend MIC's best next response."
         }
         SuggestionTrigger::Manual => {
-            "The candidate requested a refreshed suggestion based on the latest conversation."
+            "MIC requested a refreshed suggestion based on the latest conversation."
         }
     };
     format!("{focus}\n\nConversation transcript:\n{context}")
@@ -264,6 +263,7 @@ fn build_conversation_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assistant::settings::AssistantSettings;
     use crate::audio::recording_state::TranscriptSource;
 
     fn transcript(
@@ -323,14 +323,9 @@ mod tests {
     #[test]
     fn custom_prompt_is_resolved_from_assistant_settings() {
         let mut settings = AssistantSettings::default();
-        settings.profiles.insert(
-            super::super::AssistantProfile::Interview,
-            super::super::settings::AssistantProfileSettings {
-                system_prompt: Some("Answer as a systems candidate.".to_string()),
-            },
-        );
+        settings.profiles[0].system_prompt = "Answer as a systems candidate.".to_string();
         assert_eq!(
-            settings.resolved_system_prompt(super::super::AssistantProfile::Interview),
+            settings.profile("interview").unwrap().system_prompt,
             "Answer as a systems candidate."
         );
     }

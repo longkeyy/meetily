@@ -7,6 +7,10 @@ import {
   takeReadySuggestionTrigger,
   turnEndSuggestionTrigger,
 } from '../../src/lib/conversation-assistant';
+import {
+  activeAssistantProfile,
+  AssistantSettings,
+} from '../../src/types/assistant-settings';
 
 describe('conversation assistant state', () => {
   test('loads the persisted profile and enabled preference', () => {
@@ -18,6 +22,15 @@ describe('conversation assistant state', () => {
     expect(state.enabled).toBe(true);
     expect(state.profile).toBe('interview');
     expect(state.status).toBe('waiting');
+  });
+
+  test('accepts a user-defined active profile', () => {
+    const state = assistantReducer(initialAssistantState, {
+      type: 'settingsLoaded',
+      enabled: true,
+      profile: 'sales-assistant',
+    });
+    expect(state.profile).toBe('sales-assistant');
   });
 
   test('tracks speaker and microphone activity independently', () => {
@@ -89,6 +102,47 @@ describe('conversation assistant state', () => {
     expect(state.enabled).toBe(true);
     expect(state.suggestion).toBeNull();
     expect(state.status).toBe('waiting');
+  });
+});
+
+describe('realtime assistant profiles', () => {
+  test('resolves the selected custom profile', () => {
+    const settings: AssistantSettings = {
+      enabledByDefault: true,
+      activeProfileId: 'sales-assistant',
+      isConfigured: true,
+      profiles: [
+        {
+          id: 'interview',
+          name: 'Interview Assistant',
+          builtIn: true,
+          intervalSeconds: 30,
+          modelMode: 'followSummary',
+          provider: null,
+          model: null,
+          customOpenAIBaseUrl: null,
+          customOpenAIApiKey: null,
+          systemPrompt: 'Interview prompt',
+          defaultSystemPrompt: 'Interview prompt',
+        },
+        {
+          id: 'sales-assistant',
+          name: 'Sales Assistant',
+          builtIn: false,
+          intervalSeconds: 15,
+          modelMode: 'custom',
+          provider: 'ollama',
+          model: 'gemma3:4b',
+          customOpenAIBaseUrl: null,
+          customOpenAIApiKey: null,
+          systemPrompt: 'Sales prompt',
+          defaultSystemPrompt: 'Interview prompt',
+        },
+      ],
+    };
+
+    expect(activeAssistantProfile(settings).name).toBe('Sales Assistant');
+    expect(activeAssistantProfile(settings).intervalSeconds).toBe(15);
   });
 });
 
