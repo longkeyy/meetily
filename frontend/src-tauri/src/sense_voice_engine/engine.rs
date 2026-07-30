@@ -6,6 +6,7 @@ use super::model::{
 use crate::audio::transcription::provider::{
     TranscriptResult, TranscriptionError, TranscriptionProvider,
 };
+use crate::sherpa_provider::{create_offline_recognizer, SherpaModelFamily};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -299,10 +300,8 @@ fn create_recognizer(model_dir: &Path) -> Result<OfflineRecognizer> {
     };
     config.model_config.tokens = Some(path_string(model_dir.join("tokens.txt"))?);
     config.model_config.num_threads = 3;
-    config.model_config.provider = Some("cpu".to_string());
     config.decoding_method = Some("greedy_search".to_string());
-    OfflineRecognizer::create(&config)
-        .ok_or_else(|| anyhow!("sherpa-onnx could not create the SenseVoice recognizer"))
+    create_offline_recognizer(SherpaModelFamily::SenseVoice, &config)
 }
 
 fn path_string(path: PathBuf) -> Result<String> {

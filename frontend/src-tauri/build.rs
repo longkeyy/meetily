@@ -4,6 +4,7 @@ mod ffmpeg;
 fn main() {
     // GPU Acceleration Detection and Build Guidance
     detect_and_report_gpu_capabilities();
+    validate_sherpa_cuda_packaging();
 
     #[cfg(target_os = "macos")]
     {
@@ -20,6 +21,27 @@ fn main() {
     ffmpeg::ensure_ffmpeg_binary();
 
     tauri_build::build()
+}
+
+fn validate_sherpa_cuda_packaging() {
+    println!("cargo:rerun-if-env-changed=SHERPA_ONNX_LIB_DIR");
+    if std::env::var_os("CARGO_FEATURE_SHERPA_CUDA").is_none() {
+        return;
+    }
+
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os == "macos" {
+        panic!("The sherpa-cuda feature is only supported for Windows and Linux packaging");
+    }
+    if std::env::var_os("SHERPA_ONNX_LIB_DIR").is_none() {
+        panic!(
+            "The sherpa-cuda feature requires SHERPA_ONNX_LIB_DIR to point to a CUDA-enabled sherpa-onnx native library bundle"
+        );
+    }
+
+    println!(
+        "cargo:warning=Sherpa-ONNX CUDA requested with an explicit native library bundle; runtime recognizer creation will still fall back to CPU if unavailable"
+    );
 }
 
 /// Detects GPU acceleration capabilities and provides build guidance
