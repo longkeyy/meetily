@@ -21,7 +21,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
-import { RealtimeAssistantPanel } from '@/components/InterviewAssistantPanel';
+import { RealtimeAssistantController } from '@/components/InterviewAssistantPanel';
 import { useIntelligentTranscriptRecorder } from '@/hooks/useIntelligentTranscriptRecorder';
 import { RealtimeSummaryPanel } from '@/components/RealtimeSummaryPanel';
 
@@ -226,18 +226,7 @@ export default function Home() {
 
         {recordingState.isRecording && <RealtimeSummaryPanel />}
 
-        {recordingState.isRecording && (
-          <div className="fixed bottom-28 left-0 right-0 z-10">
-            <div
-              className="flex justify-center pl-8 transition-[margin] duration-300"
-              style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}
-            >
-              <div className="w-[calc(100%-1rem)] max-w-[750px] sm:w-2/3">
-                <RealtimeAssistantPanel />
-              </div>
-            </div>
-          </div>
-        )}
+        {recordingState.isRecording && <RealtimeAssistantController />}
 
         {/* Recording controls - only show when permissions are granted or already recording and not showing status messages */}
         {(hasMicrophone || isRecording) &&
