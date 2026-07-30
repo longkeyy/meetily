@@ -53,6 +53,7 @@ pub mod openrouter;
 pub mod parakeet_engine;
 pub mod qwen_asr_engine;
 pub mod sense_voice_engine;
+mod sherpa_provider;
 pub mod state;
 pub mod summary;
 pub mod tray;
