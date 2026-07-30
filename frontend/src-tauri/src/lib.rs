@@ -585,6 +585,7 @@ pub fn run() {
             meeting_intelligence::commands::api_generate_realtime_summary,
             meeting_intelligence::commands::api_get_realtime_summary,
             meeting_intelligence::commands::api_regenerate_realtime_summary,
+            meeting_intelligence::commands::api_finalize_realtime_summary,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,

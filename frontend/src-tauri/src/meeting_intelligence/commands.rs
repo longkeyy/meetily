@@ -51,6 +51,27 @@ pub async fn api_regenerate_realtime_summary<R: Runtime>(
         &app,
         state.db_manager.pool(),
         &meeting_id,
+        intelligence_settings.realtime_summary_interval_seconds,
+        &intelligence_settings.realtime_summary_prompt,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn api_finalize_realtime_summary<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<RealtimeSummaryDocument, String> {
+    let intelligence_settings = settings::load_settings(&app);
+    if !intelligence_settings.realtime_summary_enabled {
+        return Err("Realtime summary is disabled".to_string());
+    }
+    realtime_summary::finalize_for_meeting(
+        &app,
+        state.db_manager.pool(),
+        &meeting_id,
+        intelligence_settings.realtime_summary_interval_seconds,
         &intelligence_settings.realtime_summary_prompt,
     )
     .await

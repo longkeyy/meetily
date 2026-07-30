@@ -282,8 +282,8 @@ export function useRecordingStop(
 
           try {
             if (intelligenceSettings?.realtimeSummaryEnabled && freshTranscripts.length > 0) {
-              setStatus(RecordingStatus.SAVING, 'Refreshing realtime summary...');
-              await meetingIntelligenceService.regenerateRealtimeForMeeting(meetingId);
+              setStatus(RecordingStatus.SAVING, 'Finalizing realtime summary...');
+              await meetingIntelligenceService.finalizeRealtimeForMeeting(meetingId);
             }
           } catch (error) {
             console.warn('Failed to finalize realtime summary:', error);

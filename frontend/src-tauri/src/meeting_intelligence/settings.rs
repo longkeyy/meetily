@@ -22,7 +22,7 @@ pub const DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT: &str = r#"你是会议智能记
 7. 不添加讽刺、情绪化评价、能力判断或类似“这波”“致命伤”的主观旁白；只有参与者明确表达的评价才能记录，并注明是谁表达的。
 8. 不输出“会议详细”等标题，不解释处理过程，直接输出整理后的详细记录。"#;
 
-pub const DEFAULT_REALTIME_SUMMARY_PROMPT: &str = r#"你是会议实时摘要助手。你永远不回应会议参与者，只根据已有摘要和新增原始转录，直接输出截至当前时刻的完整累计摘要。
+pub const DEFAULT_REALTIME_SUMMARY_PROMPT: &str = r#"你是会议实时摘要助手。你永远不回应会议参与者，只总结当前时间段内提供的原始转录。
 
 使用 Markdown 且只包含以下部分：
 ## 讨论主题
@@ -35,11 +35,31 @@ pub const DEFAULT_REALTIME_SUMMARY_PROMPT: &str = r#"你是会议实时摘要助
 2. 新内容纠正旧内容时采用最新的明确表述。
 3. 没有结论、行动项或未解决问题时写“暂无”，不得杜撰。
 4. 不加入能力评价、情绪化判断或会议中没有出现的推断。
-5. 不解释处理过程，直接输出完整累计摘要。"#;
+5. 不引用或重复其他时间段的摘要，不解释处理过程，直接输出当前时间段的摘要。"#;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MeetingIntelligenceModelMode {
+    FollowSummary,
+    Custom,
+}
+
+impl Default for MeetingIntelligenceModelMode {
+    fn default() -> Self {
+        Self::FollowSummary
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct MeetingIntelligenceSettings {
+    pub model_mode: MeetingIntelligenceModelMode,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub ollama_endpoint: Option<String>,
+    pub custom_openai_base_url: Option<String>,
+    pub custom_openai_api_key: Option<String>,
     pub intelligent_transcript_enabled: bool,
     pub intelligent_transcript_prompt: String,
     pub realtime_summary_enabled: bool,
@@ -50,6 +70,13 @@ pub struct MeetingIntelligenceSettings {
 impl Default for MeetingIntelligenceSettings {
     fn default() -> Self {
         Self {
+            model_mode: MeetingIntelligenceModelMode::FollowSummary,
+            provider: None,
+            model: None,
+            api_key: None,
+            ollama_endpoint: None,
+            custom_openai_base_url: None,
+            custom_openai_api_key: None,
             intelligent_transcript_enabled: true,
             intelligent_transcript_prompt: DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT.to_string(),
             realtime_summary_enabled: true,
@@ -62,6 +89,13 @@ impl Default for MeetingIntelligenceSettings {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingIntelligenceSettingsUpdate {
+    pub model_mode: MeetingIntelligenceModelMode,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub ollama_endpoint: Option<String>,
+    pub custom_openai_base_url: Option<String>,
+    pub custom_openai_api_key: Option<String>,
     pub intelligent_transcript_enabled: bool,
     pub intelligent_transcript_prompt: String,
     pub realtime_summary_enabled: bool,
@@ -72,6 +106,13 @@ pub struct MeetingIntelligenceSettingsUpdate {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeetingIntelligenceSettingsView {
+    pub model_mode: MeetingIntelligenceModelMode,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub ollama_endpoint: Option<String>,
+    pub custom_openai_base_url: Option<String>,
+    pub custom_openai_api_key: Option<String>,
     pub intelligent_transcript_enabled: bool,
     pub intelligent_transcript_prompt: String,
     pub default_intelligent_transcript_prompt: String,
@@ -84,6 +125,13 @@ pub struct MeetingIntelligenceSettingsView {
 impl From<MeetingIntelligenceSettings> for MeetingIntelligenceSettingsView {
     fn from(settings: MeetingIntelligenceSettings) -> Self {
         Self {
+            model_mode: settings.model_mode,
+            provider: settings.provider,
+            model: settings.model,
+            api_key: settings.api_key,
+            ollama_endpoint: settings.ollama_endpoint,
+            custom_openai_base_url: settings.custom_openai_base_url,
+            custom_openai_api_key: settings.custom_openai_api_key,
             intelligent_transcript_enabled: settings.intelligent_transcript_enabled,
             intelligent_transcript_prompt: settings.intelligent_transcript_prompt,
             default_intelligent_transcript_prompt: DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT
@@ -98,6 +146,7 @@ impl From<MeetingIntelligenceSettings> for MeetingIntelligenceSettingsView {
 
 impl MeetingIntelligenceSettings {
     fn apply_update(&mut self, update: MeetingIntelligenceSettingsUpdate) -> Result<()> {
+        validate_model_settings(&update)?;
         let prompt = update.intelligent_transcript_prompt.trim();
         if prompt.is_empty() {
             return Err(anyhow!("Intelligent transcript prompt cannot be empty"));
@@ -123,6 +172,13 @@ impl MeetingIntelligenceSettings {
                 "Realtime summary interval must be between {MIN_REALTIME_SUMMARY_INTERVAL_SECONDS} and {MAX_REALTIME_SUMMARY_INTERVAL_SECONDS} seconds"
             ));
         }
+        self.model_mode = update.model_mode;
+        self.provider = normalize_optional(update.provider);
+        self.model = normalize_optional(update.model);
+        self.api_key = normalize_optional(update.api_key);
+        self.ollama_endpoint = normalize_endpoint(update.ollama_endpoint);
+        self.custom_openai_base_url = normalize_endpoint(update.custom_openai_base_url);
+        self.custom_openai_api_key = normalize_optional(update.custom_openai_api_key);
         self.intelligent_transcript_enabled = update.intelligent_transcript_enabled;
         self.intelligent_transcript_prompt = prompt.to_string();
         self.realtime_summary_enabled = update.realtime_summary_enabled;
@@ -130,6 +186,71 @@ impl MeetingIntelligenceSettings {
         self.realtime_summary_prompt = realtime_prompt.to_string();
         Ok(())
     }
+}
+
+fn normalize_optional(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn normalize_endpoint(value: Option<String>) -> Option<String> {
+    normalize_optional(value).map(|value| value.trim_end_matches('/').to_string())
+}
+
+fn validate_http_endpoint(value: &str, label: &str) -> Result<()> {
+    if !value.starts_with("http://") && !value.starts_with("https://") {
+        return Err(anyhow!("{label} must start with http:// or https://"));
+    }
+    Ok(())
+}
+
+fn validate_model_settings(update: &MeetingIntelligenceSettingsUpdate) -> Result<()> {
+    if update.model_mode == MeetingIntelligenceModelMode::FollowSummary {
+        return Ok(());
+    }
+    let provider = update.provider.as_deref().unwrap_or_default().trim();
+    let model = update.model.as_deref().unwrap_or_default().trim();
+    let parsed = crate::summary::llm_client::LLMProvider::from_str(provider)
+        .map_err(|error| anyhow!(error))?;
+    if model.is_empty() {
+        return Err(anyhow!("Select a model for Meeting Notes"));
+    }
+    match parsed {
+        crate::summary::llm_client::LLMProvider::Ollama => {
+            if let Some(endpoint) = update.ollama_endpoint.as_deref() {
+                if !endpoint.trim().is_empty() {
+                    validate_http_endpoint(endpoint.trim(), "Ollama endpoint")?;
+                }
+            }
+        }
+        crate::summary::llm_client::LLMProvider::BuiltInAI => {}
+        crate::summary::llm_client::LLMProvider::CustomOpenAI => {
+            let endpoint = update
+                .custom_openai_base_url
+                .as_deref()
+                .unwrap_or_default()
+                .trim();
+            if endpoint.is_empty() {
+                return Err(anyhow!("Enter a Custom OpenAI base URL for Meeting Notes"));
+            }
+            validate_http_endpoint(endpoint, "Custom OpenAI base URL")?;
+        }
+        _ => {
+            if update
+                .api_key
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            {
+                return Err(anyhow!(
+                    "Enter an API key for the selected Meeting Notes provider"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn load_settings<R: Runtime>(app: &AppHandle<R>) -> MeetingIntelligenceSettings {
@@ -183,6 +304,13 @@ mod tests {
         let mut settings = MeetingIntelligenceSettings::default();
         assert!(settings
             .apply_update(MeetingIntelligenceSettingsUpdate {
+                model_mode: MeetingIntelligenceModelMode::FollowSummary,
+                provider: None,
+                model: None,
+                api_key: None,
+                ollama_endpoint: None,
+                custom_openai_base_url: None,
+                custom_openai_api_key: None,
                 intelligent_transcript_enabled: true,
                 intelligent_transcript_prompt: "   ".to_string(),
                 realtime_summary_enabled: true,
@@ -192,6 +320,13 @@ mod tests {
             .is_err());
         settings
             .apply_update(MeetingIntelligenceSettingsUpdate {
+                model_mode: MeetingIntelligenceModelMode::FollowSummary,
+                provider: None,
+                model: None,
+                api_key: None,
+                ollama_endpoint: None,
+                custom_openai_base_url: None,
+                custom_openai_api_key: None,
                 intelligent_transcript_enabled: false,
                 intelligent_transcript_prompt: "  Direct output  ".to_string(),
                 realtime_summary_enabled: true,
@@ -211,6 +346,13 @@ mod tests {
 
         let mut settings = MeetingIntelligenceSettings::default();
         let result = settings.apply_update(MeetingIntelligenceSettingsUpdate {
+            model_mode: MeetingIntelligenceModelMode::FollowSummary,
+            provider: None,
+            model: None,
+            api_key: None,
+            ollama_endpoint: None,
+            custom_openai_base_url: None,
+            custom_openai_api_key: None,
             intelligent_transcript_enabled: true,
             intelligent_transcript_prompt: DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT.to_string(),
             realtime_summary_enabled: true,
@@ -218,5 +360,33 @@ mod tests {
             realtime_summary_prompt: DEFAULT_REALTIME_SUMMARY_PROMPT.to_string(),
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn independent_model_requires_provider_specific_connection_settings() {
+        let mut settings = MeetingIntelligenceSettings::default();
+        let mut update = MeetingIntelligenceSettingsUpdate {
+            model_mode: MeetingIntelligenceModelMode::Custom,
+            provider: Some("openai".to_string()),
+            model: Some("gpt-4.1-mini".to_string()),
+            api_key: None,
+            ollama_endpoint: None,
+            custom_openai_base_url: None,
+            custom_openai_api_key: None,
+            intelligent_transcript_enabled: true,
+            intelligent_transcript_prompt: DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT.to_string(),
+            realtime_summary_enabled: true,
+            realtime_summary_interval_seconds: 120,
+            realtime_summary_prompt: DEFAULT_REALTIME_SUMMARY_PROMPT.to_string(),
+        };
+        assert!(settings.apply_update(update.clone()).is_err());
+
+        update.provider = Some("custom-openai".to_string());
+        update.custom_openai_base_url = Some("http://localhost:8000/v1/".to_string());
+        settings.apply_update(update).unwrap();
+        assert_eq!(
+            settings.custom_openai_base_url.as_deref(),
+            Some("http://localhost:8000/v1")
+        );
     }
 }

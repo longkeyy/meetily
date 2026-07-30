@@ -22,6 +22,7 @@ static BACKGROUND_GENERATION_ID: AtomicU64 = AtomicU64::new(0);
 static ACTIVE_BACKGROUND_GENERATION: Mutex<Option<(u64, CancellationToken)>> = Mutex::new(None);
 
 pub(crate) struct LlmRuntimeConfig {
+    pub(crate) provider_name: String,
     pub(crate) provider: LLMProvider,
     pub(crate) model: String,
     pub(crate) api_key: String,
@@ -258,13 +259,51 @@ pub(crate) async fn load_runtime_config<R: Runtime>(
     app: &AppHandle<R>,
     pool: &SqlitePool,
 ) -> Result<LlmRuntimeConfig, String> {
+    let intelligence_settings = super::settings::load_settings(app);
+    if intelligence_settings.model_mode == super::settings::MeetingIntelligenceModelMode::Custom {
+        let provider_name = intelligence_settings
+            .provider
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let provider = LLMProvider::from_str(&provider_name)?;
+        let model = intelligence_settings
+            .model
+            .filter(|model| !model.trim().is_empty())
+            .ok_or_else(|| "Select a model for Meeting Notes".to_string())?;
+        let api_key = match &provider {
+            LLMProvider::Ollama | LLMProvider::BuiltInAI => String::new(),
+            LLMProvider::CustomOpenAI => intelligence_settings
+                .custom_openai_api_key
+                .unwrap_or_default(),
+            _ => intelligence_settings
+                .api_key
+                .filter(|key| !key.trim().is_empty())
+                .ok_or_else(|| "API key not found for Meeting Notes provider".to_string())?,
+        };
+        return Ok(LlmRuntimeConfig {
+            provider_name,
+            provider,
+            model,
+            api_key,
+            ollama_endpoint: intelligence_settings.ollama_endpoint,
+            custom_openai_endpoint: intelligence_settings.custom_openai_base_url,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            app_data_dir: app.path().app_data_dir().ok(),
+        });
+    }
+
     let setting = SettingsRepository::get_model_config(pool)
         .await
         .map_err(|error| format!("Failed to read summary model configuration: {error}"))?
         .ok_or_else(|| {
             "Configure a summary model before enabling intelligent recording".to_string()
         })?;
-    let provider = LLMProvider::from_str(&setting.provider)?;
+    let provider_name = setting.provider.clone();
+    let provider = LLMProvider::from_str(&provider_name)?;
     let mut model = setting.model;
     let mut api_key = String::new();
     let mut custom_openai_endpoint = None;
@@ -292,6 +331,7 @@ pub(crate) async fn load_runtime_config<R: Runtime>(
     }
 
     Ok(LlmRuntimeConfig {
+        provider_name,
         provider,
         model,
         api_key,

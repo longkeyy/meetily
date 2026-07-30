@@ -1,6 +1,16 @@
-import { Transcript } from '@/types';
+import type { Transcript } from '@/types';
+import type { ModelConfig } from '@/services/configService';
+
+export type MeetingIntelligenceModelMode = 'followSummary' | 'custom';
 
 export interface MeetingIntelligenceSettings {
+  modelMode: MeetingIntelligenceModelMode;
+  provider: ModelConfig['provider'] | null;
+  model: string | null;
+  apiKey: string | null;
+  ollamaEndpoint: string | null;
+  customOpenAIBaseUrl: string | null;
+  customOpenAIApiKey: string | null;
   intelligentTranscriptEnabled: boolean;
   intelligentTranscriptPrompt: string;
   defaultIntelligentTranscriptPrompt: string;
@@ -11,6 +21,13 @@ export interface MeetingIntelligenceSettings {
 }
 
 export interface MeetingIntelligenceSettingsUpdate {
+  modelMode: MeetingIntelligenceModelMode;
+  provider: ModelConfig['provider'] | null;
+  model: string | null;
+  apiKey: string | null;
+  ollamaEndpoint: string | null;
+  customOpenAIBaseUrl: string | null;
+  customOpenAIApiKey: string | null;
   intelligentTranscriptEnabled: boolean;
   intelligentTranscriptPrompt: string;
   realtimeSummaryEnabled: boolean;
@@ -33,10 +50,30 @@ export interface IntelligentTranscriptResponse {
 
 export interface RealtimeSummaryDocument {
   version: number;
-  markdown: string;
+  segments: RealtimeSummarySegment[];
   coveredUntil: number;
   sourceRevision: number;
   updatedAt: string;
+}
+
+export type RealtimeSummaryTrigger = 'interval' | 'meetingEnd' | 'manual' | 'regenerate' | 'legacy';
+
+export interface RealtimeSummarySegment {
+  schemaVersion: number;
+  segmentId: string;
+  startSeconds: number;
+  endSeconds: number;
+  sourceRevisionStart: number;
+  sourceRevisionEnd: number;
+  contentFormat: 'markdown';
+  content: string;
+  trigger: RealtimeSummaryTrigger;
+  createdAt: string;
+  model: {
+    provider: string;
+    model: string;
+  };
+  promptHash: string;
 }
 
 export interface RealtimeSummaryResponse {
@@ -57,4 +94,22 @@ export interface GenerateIntelligentTranscriptRequest {
   forceFull: boolean;
 }
 
-export type GenerateRealtimeSummaryRequest = GenerateIntelligentTranscriptRequest;
+export interface GenerateRealtimeSummaryRequest extends GenerateIntelligentTranscriptRequest {
+  trigger?: RealtimeSummaryTrigger;
+}
+
+export function realtimeSummaryMarkdown(document: RealtimeSummaryDocument): string {
+  return document.segments
+    .map((segment) => `## ${formatSummaryTime(segment.startSeconds)} - ${formatSummaryTime(segment.endSeconds)}\n\n${segment.content}`)
+    .join('\n\n');
+}
+
+export function formatSummaryTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remaining = safeSeconds % 60;
+  return hours > 0
+    ? `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`
+    : `${minutes.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
+}

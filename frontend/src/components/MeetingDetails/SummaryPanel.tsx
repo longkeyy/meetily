@@ -21,10 +21,9 @@ import {
   saveMeetingSummaryLanguage,
   SummaryLanguageStorage,
 } from '@/lib/summary-language-preferences';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { meetingIntelligenceService } from '@/services/meetingIntelligenceService';
-import { RealtimeSummaryDocument } from '@/types/meeting-intelligence';
+import { realtimeSummaryMarkdown, RealtimeSummaryDocument } from '@/types/meeting-intelligence';
+import { RealtimeSummarySegments } from '@/components/RealtimeSummarySegments';
 
 interface SummaryPanelProps {
   meeting: {
@@ -329,7 +328,7 @@ export function SummaryPanel({
               disabled={!liveSummary}
               onClick={() => {
                 if (!liveSummary) return;
-                void navigator.clipboard.writeText(liveSummary.markdown)
+                void navigator.clipboard.writeText(realtimeSummaryMarkdown(liveSummary))
                   .then(() => toast.success('Realtime summary copied'));
               }}
             >
@@ -355,9 +354,7 @@ export function SummaryPanel({
               {isLiveSummaryRegenerating ? 'Refreshing realtime summary...' : 'Loading realtime summary...'}
             </div>
           ) : liveSummary ? (
-            <article className="prose max-w-none prose-headings:text-gray-900">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{liveSummary.markdown}</ReactMarkdown>
-            </article>
+            <RealtimeSummarySegments document={liveSummary} />
           ) : (
             <div className="flex h-full items-center justify-center">
               <Button onClick={() => void regenerateLiveSummary()} disabled={transcripts.length === 0}>

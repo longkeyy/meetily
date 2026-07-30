@@ -18,14 +18,14 @@ export function useRealtimeSummaryRecorder() {
   const inFlightRef = useRef(false);
   const lastRevisionRef = useRef(0);
 
-  const refresh = useCallback(async (force = false) => {
+  const refresh = useCallback(async (manual = false) => {
     if (inFlightRef.current || !enabled) return;
     const transcripts = [...transcriptsRef.current];
     const revision = transcripts.reduce(
       (latest, transcript) => Math.max(latest, transcript.sequence_id ?? 0),
       0,
     );
-    if (!force && (revision <= lastRevisionRef.current || transcripts.length === 0)) return;
+    if (revision <= lastRevisionRef.current || transcripts.length === 0) return;
     if (transcripts.length === 0) return;
 
     inFlightRef.current = true;
@@ -33,7 +33,11 @@ export function useRealtimeSummaryRecorder() {
     setError(null);
     try {
       const meetingFolder = await invoke<string>('get_meeting_folder_path');
-      const response = await meetingIntelligenceService.generateRealtime(meetingFolder, transcripts, force);
+      const response = await meetingIntelligenceService.generateRealtime(
+        meetingFolder,
+        transcripts,
+        manual ? 'manual' : 'interval',
+      );
       setDocument(response.document);
       lastRevisionRef.current = response.document.sourceRevision || revision;
       setStatus('ready');
