@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { InterviewAssistantPanel } from '@/components/InterviewAssistantPanel';
 import { useIntelligentTranscriptRecorder } from '@/hooks/useIntelligentTranscriptRecorder';
+import { RealtimeSummaryPanel } from '@/components/RealtimeSummaryPanel';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -221,6 +222,8 @@ export default function Home() {
           isStopping={isStopping}
           showModal={showModal}
         />
+
+        {recordingState.isRecording && <RealtimeSummaryPanel />}
 
         {recordingState.isRecording && (
           <div className="fixed bottom-28 left-0 right-0 z-10">

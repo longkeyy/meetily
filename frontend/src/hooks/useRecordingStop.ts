@@ -266,8 +266,9 @@ export function useRecordingStop(
             throw new Error('No meeting ID received from save operation');
           }
 
+          let intelligenceSettings = null;
           try {
-            const intelligenceSettings = await meetingIntelligenceService.getSettings();
+            intelligenceSettings = await meetingIntelligenceService.getSettings();
             if (intelligenceSettings.intelligentTranscriptEnabled && freshTranscripts.length > 0) {
               setStatus(RecordingStatus.SAVING, 'Generating intelligent detailed record...');
               await meetingIntelligenceService.regenerateForMeeting(meetingId);
@@ -275,6 +276,18 @@ export function useRecordingStop(
           } catch (error) {
             console.warn('Failed to finalize intelligent detailed record:', error);
             toast.warning('Meeting saved without an intelligent detailed record', {
+              description: 'You can regenerate it from the meeting details page.',
+            });
+          }
+
+          try {
+            if (intelligenceSettings?.realtimeSummaryEnabled && freshTranscripts.length > 0) {
+              setStatus(RecordingStatus.SAVING, 'Refreshing realtime summary...');
+              await meetingIntelligenceService.regenerateRealtimeForMeeting(meetingId);
+            }
+          } catch (error) {
+            console.warn('Failed to finalize realtime summary:', error);
+            toast.warning('Meeting saved without a final realtime summary', {
               description: 'You can regenerate it from the meeting details page.',
             });
           }

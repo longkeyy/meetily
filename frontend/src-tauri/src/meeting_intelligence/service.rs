@@ -21,16 +21,16 @@ const MAX_OUTPUT_TOKENS: u32 = 3_000;
 static BACKGROUND_GENERATION_ID: AtomicU64 = AtomicU64::new(0);
 static ACTIVE_BACKGROUND_GENERATION: Mutex<Option<(u64, CancellationToken)>> = Mutex::new(None);
 
-struct LlmRuntimeConfig {
-    provider: LLMProvider,
-    model: String,
-    api_key: String,
-    ollama_endpoint: Option<String>,
-    custom_openai_endpoint: Option<String>,
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    top_p: Option<f32>,
-    app_data_dir: Option<PathBuf>,
+pub(crate) struct LlmRuntimeConfig {
+    pub(crate) provider: LLMProvider,
+    pub(crate) model: String,
+    pub(crate) api_key: String,
+    pub(crate) ollama_endpoint: Option<String>,
+    pub(crate) custom_openai_endpoint: Option<String>,
+    pub(crate) max_tokens: Option<u32>,
+    pub(crate) temperature: Option<f32>,
+    pub(crate) top_p: Option<f32>,
+    pub(crate) app_data_dir: Option<PathBuf>,
 }
 
 pub async fn generate_for_live_recording<R: Runtime>(
@@ -220,7 +220,7 @@ async fn generate_document<R: Runtime>(
     Ok(document)
 }
 
-fn register_background_generation() -> (u64, CancellationToken) {
+pub(crate) fn register_background_generation() -> (u64, CancellationToken) {
     let generation_id = BACKGROUND_GENERATION_ID.fetch_add(1, Ordering::Relaxed) + 1;
     let token = CancellationToken::new();
     if let Ok(mut active) = ACTIVE_BACKGROUND_GENERATION.lock() {
@@ -231,7 +231,7 @@ fn register_background_generation() -> (u64, CancellationToken) {
     (generation_id, token)
 }
 
-fn cleanup_background_generation(generation_id: u64) {
+pub(crate) fn cleanup_background_generation(generation_id: u64) {
     if let Ok(mut active) = ACTIVE_BACKGROUND_GENERATION.lock() {
         if active
             .as_ref()
@@ -254,7 +254,7 @@ pub fn cancel_background_generation() -> bool {
     }
 }
 
-async fn load_runtime_config<R: Runtime>(
+pub(crate) async fn load_runtime_config<R: Runtime>(
     app: &AppHandle<R>,
     pool: &SqlitePool,
 ) -> Result<LlmRuntimeConfig, String> {

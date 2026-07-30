@@ -6,6 +6,8 @@ import {
   IntelligentTranscriptResponse,
   MeetingIntelligenceSettings,
   MeetingIntelligenceSettingsUpdate,
+  RealtimeSummaryDocument,
+  RealtimeSummaryResponse,
 } from '@/types/meeting-intelligence';
 
 function toRequestTranscripts(transcripts: Transcript[]): GenerateIntelligentTranscriptRequest['transcripts'] {
@@ -49,5 +51,27 @@ export const meetingIntelligenceService = {
 
   regenerateForMeeting(meetingId: string): Promise<IntelligentTranscriptDocument> {
     return invoke('api_regenerate_intelligent_transcript', { meetingId });
+  },
+
+  async generateRealtime(
+    meetingFolder: string,
+    transcripts: Transcript[],
+    forceFull = false,
+  ): Promise<RealtimeSummaryResponse> {
+    const request: GenerateIntelligentTranscriptRequest = {
+      requestId: `${Date.now()}-${crypto.randomUUID()}`,
+      meetingFolder,
+      transcripts: toRequestTranscripts(transcripts),
+      forceFull,
+    };
+    return invoke('api_generate_realtime_summary', { request });
+  },
+
+  getRealtimeForMeeting(meetingId: string): Promise<RealtimeSummaryDocument | null> {
+    return invoke('api_get_realtime_summary', { meetingId });
+  },
+
+  regenerateRealtimeForMeeting(meetingId: string): Promise<RealtimeSummaryDocument> {
+    return invoke('api_regenerate_realtime_summary', { meetingId });
   },
 };

@@ -10,7 +10,7 @@ import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
-import { Languages, ChevronDown } from 'lucide-react';
+import { Languages, ChevronDown, Copy, LoaderCircle, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
@@ -21,6 +21,10 @@ import {
   saveMeetingSummaryLanguage,
   SummaryLanguageStorage,
 } from '@/lib/summary-language-preferences';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { meetingIntelligenceService } from '@/services/meetingIntelligenceService';
+import { RealtimeSummaryDocument } from '@/types/meeting-intelligence';
 
 interface SummaryPanelProps {
   meeting: {
@@ -100,6 +104,10 @@ export function SummaryPanel({
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
   const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const [summaryView, setSummaryView] = useState<'final' | 'live'>('final');
+  const [liveSummary, setLiveSummary] = useState<RealtimeSummaryDocument | null>(null);
+  const [isLiveSummaryLoading, setIsLiveSummaryLoading] = useState(false);
+  const [isLiveSummaryRegenerating, setIsLiveSummaryRegenerating] = useState(false);
   const languageLoadVersionRef = useRef(0);
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
@@ -145,6 +153,26 @@ export function SummaryPanel({
 
     loadSummaryLanguage();
 
+    return () => {
+      cancelled = true;
+    };
+  }, [meeting.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSummaryView('final');
+    setLiveSummary(null);
+    setIsLiveSummaryLoading(true);
+    void meetingIntelligenceService.getRealtimeForMeeting(meeting.id)
+      .then((document) => {
+        if (!cancelled) setLiveSummary(document);
+      })
+      .catch((error) => {
+        console.warn('Failed to load realtime summary:', error);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLiveSummaryLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -252,10 +280,102 @@ export function SummaryPanel({
     </Popover>
   );
 
+  const viewToggle = (
+    <div className="inline-flex h-9 items-center rounded-md border border-gray-200 bg-gray-50 p-0.5" role="tablist" aria-label="Summary view">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={summaryView === 'final'}
+        onClick={() => setSummaryView('final')}
+        className={`h-8 px-3 text-sm font-medium transition-colors ${summaryView === 'final' ? 'rounded bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+      >
+        Final
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={summaryView === 'live'}
+        onClick={() => setSummaryView('live')}
+        className={`h-8 px-3 text-sm font-medium transition-colors ${summaryView === 'live' ? 'rounded bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+      >
+        Live
+      </button>
+    </div>
+  );
+
+  const regenerateLiveSummary = async () => {
+    setIsLiveSummaryRegenerating(true);
+    try {
+      const document = await meetingIntelligenceService.regenerateRealtimeForMeeting(meeting.id);
+      setLiveSummary(document);
+      toast.success('Realtime summary refreshed');
+    } catch (error) {
+      toast.error('Failed to refresh realtime summary', { description: String(error) });
+    } finally {
+      setIsLiveSummaryRegenerating(false);
+    }
+  };
+
+  if (summaryView === 'live') {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
+        <div className="flex min-h-14 items-center justify-between gap-3 border-b border-gray-200 px-4 py-2">
+          {viewToggle}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              title="Copy realtime summary"
+              disabled={!liveSummary}
+              onClick={() => {
+                if (!liveSummary) return;
+                void navigator.clipboard.writeText(liveSummary.markdown)
+                  .then(() => toast.success('Realtime summary copied'));
+              }}
+            >
+              <Copy className="size-4" aria-hidden="true" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              title="Regenerate realtime summary"
+              disabled={isLiveSummaryRegenerating || transcripts.length === 0}
+              onClick={() => void regenerateLiveSummary()}
+            >
+              {isLiveSummaryRegenerating
+                ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                : <RefreshCw className="size-4" aria-hidden="true" />}
+            </Button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+          {isLiveSummaryLoading || isLiveSummaryRegenerating ? (
+            <div className="flex h-full items-center justify-center text-sm text-gray-500">
+              <LoaderCircle className="mr-2 size-4 animate-spin" aria-hidden="true" />
+              {isLiveSummaryRegenerating ? 'Refreshing realtime summary...' : 'Loading realtime summary...'}
+            </div>
+          ) : liveSummary ? (
+            <article className="prose max-w-none prose-headings:text-gray-900">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{liveSummary.markdown}</ReactMarkdown>
+            </article>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <Button onClick={() => void regenerateLiveSummary()} disabled={transcripts.length === 0}>
+                <RefreshCw className="mr-2 size-4" aria-hidden="true" />
+                Generate Realtime Summary
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
       {/* Title area */}
       <div className="p-4 border-b border-gray-200">
+        <div className="mb-3 flex justify-center">{viewToggle}</div>
         {/* <EditableTitle
           title={meetingTitle}
           isEditing={isEditingTitle}

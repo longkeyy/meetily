@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod realtime_summary;
 pub mod service;
 pub mod settings;
 
@@ -39,4 +40,31 @@ pub struct GenerateIntelligentTranscriptRequest {
 pub struct IntelligentTranscriptResponse {
     pub request_id: String,
     pub document: IntelligentTranscriptDocument,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeSummaryDocument {
+    pub version: u32,
+    pub markdown: String,
+    pub covered_until: f64,
+    pub source_revision: u64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateRealtimeSummaryRequest {
+    pub request_id: String,
+    pub meeting_folder: String,
+    pub transcripts: Vec<IntelligenceTranscriptInput>,
+    #[serde(default)]
+    pub force_full: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RealtimeSummaryResponse {
+    pub request_id: String,
+    pub document: RealtimeSummaryDocument,
 }
