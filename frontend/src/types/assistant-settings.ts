@@ -10,6 +10,8 @@ export interface AssistantSettings {
   modelMode: AssistantModelMode;
   provider: ModelConfig['provider'] | null;
   model: string | null;
+  customOpenAIBaseUrl: string | null;
+  customOpenAIApiKey: string | null;
   systemPrompt: string;
   defaultSystemPrompt: string;
   isConfigured: boolean;
@@ -27,6 +29,8 @@ export const FALLBACK_ASSISTANT_SETTINGS: AssistantSettings = {
   modelMode: 'followSummary',
   provider: null,
   model: null,
+  customOpenAIBaseUrl: null,
+  customOpenAIApiKey: null,
   systemPrompt: '',
   defaultSystemPrompt: '',
   isConfigured: false,

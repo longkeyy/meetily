@@ -150,15 +150,24 @@ async fn load_llm_config<R: Runtime>(
     let mut api_key = String::new();
 
     if provider == LLMProvider::CustomOpenAI {
-        let custom = SettingsRepository::get_custom_openai_config(pool)
-            .await
-            .map_err(|error| format!("Failed to read custom OpenAI configuration: {error}"))?
-            .ok_or_else(|| "Custom OpenAI is selected but is not configured".to_string())?;
-        if model_override.is_none() {
+        if model_override.is_some() {
+            custom_openai_endpoint = assistant_settings.custom_openai_base_url.clone();
+            api_key = assistant_settings
+                .custom_openai_api_key
+                .clone()
+                .unwrap_or_default();
+        } else {
+            let custom = SettingsRepository::get_custom_openai_config(pool)
+                .await
+                .map_err(|error| format!("Failed to read custom OpenAI configuration: {error}"))?
+                .ok_or_else(|| "Custom OpenAI is selected but is not configured".to_string())?;
             model = custom.model;
+            api_key = custom.api_key.unwrap_or_default();
+            custom_openai_endpoint = Some(custom.endpoint);
         }
-        api_key = custom.api_key.unwrap_or_default();
-        custom_openai_endpoint = Some(custom.endpoint);
+        if custom_openai_endpoint.is_none() {
+            return Err("Assistant Custom OpenAI base URL is not configured".to_string());
+        }
     } else if provider == LLMProvider::Ollama {
         api_key = SettingsRepository::get_api_key(pool, &provider_name)
             .await

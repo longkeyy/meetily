@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { RotateCcw, Save, Sparkles } from 'lucide-react';
+import { LoaderCircle, RotateCcw, Save, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { assistantSettingsService } from '@/services/assistantSettingsService';
-import { ModelConfig } from '@/services/configService';
+import { configService, ModelConfig } from '@/services/configService';
 import {
   AssistantSettings as AssistantSettingsValue,
   AssistantSettingsUpdate,
@@ -31,6 +31,7 @@ export function AssistantSettings() {
   const { modelConfig: summaryModel, modelOptions } = useConfig();
   const [settings, setSettings] = useState<AssistantSettingsValue | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -69,7 +70,14 @@ export function AssistantSettings() {
     setSettings((current) => {
       if (!current) return current;
       if (modelMode === 'followSummary') {
-        return { ...current, modelMode, provider: null, model: null };
+        return {
+          ...current,
+          modelMode,
+          provider: null,
+          model: null,
+          customOpenAIBaseUrl: null,
+          customOpenAIApiKey: null,
+        };
       }
       return {
         ...current,
@@ -99,6 +107,12 @@ export function AssistantSettings() {
       modelMode: settings.modelMode,
       provider: settings.modelMode === 'custom' ? settings.provider : null,
       model: settings.modelMode === 'custom' ? settings.model?.trim() || null : null,
+      customOpenAIBaseUrl: settings.modelMode === 'custom' && settings.provider === 'custom-openai'
+        ? settings.customOpenAIBaseUrl?.trim() || null
+        : null,
+      customOpenAIApiKey: settings.modelMode === 'custom' && settings.provider === 'custom-openai'
+        ? settings.customOpenAIApiKey?.trim() || null
+        : null,
       systemPrompt: settings.systemPrompt,
     };
     setIsSaving(true);
@@ -112,6 +126,29 @@ export function AssistantSettings() {
       toast.error(String(error));
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    const baseUrl = settings.customOpenAIBaseUrl?.trim() ?? '';
+    const model = settings.model?.trim() ?? '';
+    if (!baseUrl || !model) {
+      toast.error('Enter the Custom OpenAI base URL and model first');
+      return;
+    }
+
+    setIsTestingConnection(true);
+    try {
+      const result = await configService.testCustomOpenAIConnection(
+        baseUrl,
+        settings.customOpenAIApiKey?.trim() || null,
+        model,
+      );
+      toast.success(result.message || 'Connection successful');
+    } catch (error) {
+      toast.error(String(error));
+    } finally {
+      setIsTestingConnection(false);
     }
   };
 
@@ -242,6 +279,44 @@ export function AssistantSettings() {
                 {modelSuggestions.map((model) => <option key={model} value={model} />)}
               </datalist>
             </div>
+            {provider === 'custom-openai' && (
+              <>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="assistant-custom-openai-base-url">Base URL</Label>
+                  <Input
+                    id="assistant-custom-openai-base-url"
+                    type="url"
+                    value={settings.customOpenAIBaseUrl ?? ''}
+                    onChange={(event) => update('customOpenAIBaseUrl', event.target.value)}
+                    placeholder="http://localhost:8000/v1"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="assistant-custom-openai-api-key">API key</Label>
+                  <Input
+                    id="assistant-custom-openai-api-key"
+                    type="password"
+                    value={settings.customOpenAIApiKey ?? ''}
+                    onChange={(event) => update('customOpenAIApiKey', event.target.value)}
+                    placeholder="Optional"
+                    autoComplete="off"
+                    className="mt-1"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleTestConnection}
+                    disabled={isTestingConnection}
+                  >
+                    {isTestingConnection && <LoaderCircle className="mr-2 size-4 animate-spin" aria-hidden="true" />}
+                    Test connection
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </section>

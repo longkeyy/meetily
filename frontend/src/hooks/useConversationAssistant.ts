@@ -41,6 +41,8 @@ function toSettingsUpdate(settings: AssistantSettings): AssistantSettingsUpdate 
     modelMode: settings.modelMode,
     provider: settings.modelMode === 'custom' ? settings.provider : null,
     model: settings.modelMode === 'custom' ? settings.model : null,
+    customOpenAIBaseUrl: settings.modelMode === 'custom' ? settings.customOpenAIBaseUrl : null,
+    customOpenAIApiKey: settings.modelMode === 'custom' ? settings.customOpenAIApiKey : null,
     systemPrompt: settings.systemPrompt,
   };
 }

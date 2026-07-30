@@ -41,6 +41,8 @@ pub struct AssistantSettings {
     pub model_mode: AssistantModelMode,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub custom_openai_base_url: Option<String>,
+    pub custom_openai_api_key: Option<String>,
     pub profiles: HashMap<AssistantProfile, AssistantProfileSettings>,
 }
 
@@ -53,6 +55,8 @@ impl Default for AssistantSettings {
             model_mode: AssistantModelMode::FollowSummary,
             provider: None,
             model: None,
+            custom_openai_base_url: None,
+            custom_openai_api_key: None,
             profiles: HashMap::new(),
         }
     }
@@ -67,6 +71,8 @@ pub struct AssistantSettingsView {
     pub model_mode: AssistantModelMode,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub custom_openai_base_url: Option<String>,
+    pub custom_openai_api_key: Option<String>,
     pub system_prompt: String,
     pub default_system_prompt: String,
     pub is_configured: bool,
@@ -81,6 +87,8 @@ pub struct AssistantSettingsUpdate {
     pub model_mode: AssistantModelMode,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub custom_openai_base_url: Option<String>,
+    pub custom_openai_api_key: Option<String>,
     pub system_prompt: String,
 }
 
@@ -118,6 +126,14 @@ impl AssistantSettings {
             .model
             .map(|model| model.trim().to_string())
             .filter(|model| !model.is_empty());
+        self.custom_openai_base_url = update
+            .custom_openai_base_url
+            .map(|base_url| base_url.trim().trim_end_matches('/').to_string())
+            .filter(|base_url| !base_url.is_empty());
+        self.custom_openai_api_key = update
+            .custom_openai_api_key
+            .map(|api_key| api_key.trim().to_string())
+            .filter(|api_key| !api_key.is_empty());
         self.profiles
             .entry(update.profile)
             .or_default()
@@ -134,6 +150,8 @@ impl AssistantSettings {
             model_mode: self.model_mode,
             provider: self.provider.clone(),
             model: self.model.clone(),
+            custom_openai_base_url: self.custom_openai_base_url.clone(),
+            custom_openai_api_key: self.custom_openai_api_key.clone(),
             system_prompt: self.resolved_system_prompt(profile),
             default_system_prompt: profile_definition(profile).system_prompt.to_string(),
             is_configured,
@@ -222,6 +240,21 @@ fn validate_update(update: &AssistantSettingsUpdate) -> Result<()> {
         if model.is_empty() {
             return Err(anyhow!("Select a model for the assistant"));
         }
+        if provider.eq_ignore_ascii_case("custom-openai") {
+            let base_url = update
+                .custom_openai_base_url
+                .as_deref()
+                .unwrap_or_default()
+                .trim();
+            if base_url.is_empty() {
+                return Err(anyhow!("Enter a Custom OpenAI base URL for the assistant"));
+            }
+            if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+                return Err(anyhow!(
+                    "Custom OpenAI base URL must start with http:// or https://"
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -238,6 +271,8 @@ mod tests {
             model_mode: AssistantModelMode::Custom,
             provider: Some("ollama".to_string()),
             model: Some("qwen3:4b".to_string()),
+            custom_openai_base_url: None,
+            custom_openai_api_key: None,
             system_prompt: "Give a concise interview response.".to_string(),
         }
     }
@@ -305,5 +340,24 @@ mod tests {
         input.interval_seconds = 30;
         input.model = None;
         assert!(validate_update(&input).is_err());
+    }
+
+    #[test]
+    fn custom_openai_requires_and_normalizes_an_independent_base_url() {
+        let mut input = update();
+        input.provider = Some("custom-openai".to_string());
+        input.model = Some("local-model".to_string());
+        assert!(validate_update(&input).is_err());
+
+        input.custom_openai_base_url = Some("http://localhost:1234/v1/".to_string());
+        input.custom_openai_api_key = Some(" test-key ".to_string());
+        let mut settings = AssistantSettings::default();
+        settings.apply_update(input).unwrap();
+
+        assert_eq!(
+            settings.custom_openai_base_url.as_deref(),
+            Some("http://localhost:1234/v1")
+        );
+        assert_eq!(settings.custom_openai_api_key.as_deref(), Some("test-key"));
     }
 }
