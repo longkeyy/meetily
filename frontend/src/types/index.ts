@@ -21,7 +21,7 @@ export interface AssistantTranscript {
 
 export interface AssistantSuggestionRequest {
   requestId: string;
-  profile: 'interview';
+  profile: string;
   trigger: 'periodic' | 'turnEnd' | 'manual';
   focusStartTime?: number;
   transcripts: AssistantTranscript[];
@@ -29,7 +29,7 @@ export interface AssistantSuggestionRequest {
 
 export interface AssistantSuggestionResponse {
   requestId: string;
-  profile: 'interview';
+  profile: string;
   trigger: 'periodic' | 'turnEnd' | 'manual';
   suggestion: string;
 }

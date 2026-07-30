@@ -22,7 +22,7 @@ const TABS = [
   { value: 'Transcriptionmodels', label: 'Transcription', icon: DatabaseIcon },
   { value: 'summaryModels', label: 'Summary', icon: SparkleIcon },
   { value: 'meetingIntelligence', label: 'Meeting Notes', icon: FileText },
-  { value: 'assistant', label: 'Assistant', icon: MessagesSquare },
+  { value: 'assistant', label: 'Realtime Assistant', icon: MessagesSquare },
   { value: 'beta', label: 'Beta', icon: FlaskConical }
 ] as const;
 

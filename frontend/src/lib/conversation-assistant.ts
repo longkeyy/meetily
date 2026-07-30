@@ -1,4 +1,4 @@
-export type AssistantProfile = 'interview';
+export type AssistantProfile = string;
 export type SuggestionTrigger = 'periodic' | 'turnEnd' | 'manual';
 export type AssistantStatus = 'disabled' | 'waiting' | 'listening' | 'speaking' | 'generating' | 'ready' | 'error';
 

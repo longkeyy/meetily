@@ -21,7 +21,7 @@ import { TranscriptRecovery } from '@/components/TranscriptRecovery';
 import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
-import { InterviewAssistantPanel } from '@/components/InterviewAssistantPanel';
+import { RealtimeAssistantPanel } from '@/components/InterviewAssistantPanel';
 import { useIntelligentTranscriptRecorder } from '@/hooks/useIntelligentTranscriptRecorder';
 import { RealtimeSummaryPanel } from '@/components/RealtimeSummaryPanel';
 
@@ -232,7 +232,7 @@ export default function Home() {
               style={{ marginLeft: sidebarCollapsed ? '4rem' : '16rem' }}
             >
               <div className="w-[calc(100%-1rem)] max-w-[750px] sm:w-2/3">
-                <InterviewAssistantPanel />
+                <RealtimeAssistantPanel />
               </div>
             </div>
           </div>
