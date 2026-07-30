@@ -4,7 +4,7 @@ import type { AssistantState } from '@/lib/conversation-assistant';
 export const REALTIME_ASSISTANT_WINDOW_LABEL = 'realtime-assistant';
 export const REALTIME_ASSISTANT_STATE_EVENT = 'realtime-assistant-state';
 export const REALTIME_ASSISTANT_ACTION_EVENT = 'realtime-assistant-action';
-export const REALTIME_ASSISTANT_POSITION_STORAGE_KEY = 'realtimeAssistant.window.position';
+export const REALTIME_ASSISTANT_POSITION_STORAGE_KEY = 'realtimeAssistant.window.position.v2';
 
 interface WindowPosition {
   x: number;
