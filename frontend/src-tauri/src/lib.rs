@@ -582,6 +582,7 @@ pub fn run() {
             meeting_intelligence::commands::api_generate_intelligent_transcript,
             meeting_intelligence::commands::api_get_intelligent_transcript,
             meeting_intelligence::commands::api_regenerate_intelligent_transcript,
+            meeting_intelligence::commands::api_finalize_intelligent_transcript,
             meeting_intelligence::commands::api_generate_realtime_summary,
             meeting_intelligence::commands::api_get_realtime_summary,
             meeting_intelligence::commands::api_regenerate_realtime_summary,

@@ -19,10 +19,34 @@ pub struct IntelligenceTranscriptInput {
 #[serde(rename_all = "camelCase")]
 pub struct IntelligentTranscriptDocument {
     pub version: u32,
-    pub markdown: String,
+    pub turns: Vec<IntelligentTranscriptTurn>,
     pub covered_until: f64,
     pub source_revision: u64,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct IntelligentTranscriptModelInfo {
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntelligentTranscriptTurn {
+    pub schema_version: u32,
+    pub turn_id: String,
+    pub source: String,
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub source_revision_start: u64,
+    pub source_revision_end: u64,
+    pub raw_text: String,
+    pub content: String,
+    pub created_at: String,
+    pub model: IntelligentTranscriptModelInfo,
+    pub prompt_hash: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

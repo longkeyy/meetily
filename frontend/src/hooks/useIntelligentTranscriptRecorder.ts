@@ -1,54 +1,90 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import { meetingIntelligenceService } from '@/services/meetingIntelligenceService';
+import type { IntelligentTranscriptDocument } from '@/types/meeting-intelligence';
+import { completedTurnRevision } from '@/lib/refined-transcript';
 
-const UPDATE_INTERVAL_MS = 150_000;
+export type RefinedTranscriptStatus = 'idle' | 'waiting' | 'generating' | 'ready' | 'error';
 
-export function useIntelligentTranscriptRecorder() {
+export interface RefinedTranscriptState {
+  document: IntelligentTranscriptDocument | null;
+  status: RefinedTranscriptStatus;
+  error: string | null;
+}
+
+export function useIntelligentTranscriptRecorder(): RefinedTranscriptState {
   const { isRecording, isPaused } = useRecordingState();
-  const { transcriptsRef } = useTranscripts();
-  const inFlightRef = useRef(false);
-  const lastRevisionRef = useRef(0);
-
-  useEffect(() => {
-    if (!isRecording || isPaused) return;
-    let disposed = false;
-
-    const updateDetailedRecord = async () => {
-      if (inFlightRef.current || disposed) return;
-      const transcripts = [...transcriptsRef.current];
-      const revision = transcripts.reduce(
-        (latest, transcript) => Math.max(latest, transcript.sequence_id ?? 0),
-        0,
-      );
-      if (revision <= lastRevisionRef.current || transcripts.length === 0) return;
-
-      inFlightRef.current = true;
-      try {
-        const settings = await meetingIntelligenceService.getSettings();
-        if (!settings.intelligentTranscriptEnabled) return;
-        const meetingFolder = await invoke<string>('get_meeting_folder_path');
-        await meetingIntelligenceService.generateLive(meetingFolder, transcripts);
-        lastRevisionRef.current = revision;
-      } catch (error) {
-        console.warn('Failed to update the intelligent transcript:', error);
-      } finally {
-        inFlightRef.current = false;
-      }
-    };
-
-    const timer = window.setInterval(() => void updateDetailedRecord(), UPDATE_INTERVAL_MS);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [isPaused, isRecording, transcriptsRef]);
+  const { transcripts } = useTranscripts();
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastQueuedRevisionRef = useRef(0);
+  const pendingCountRef = useRef(0);
+  const sessionRef = useRef(0);
+  const [state, setState] = useState<RefinedTranscriptState>({
+    document: null,
+    status: 'idle',
+    error: null,
+  });
 
   useEffect(() => {
     if (isRecording) {
-      lastRevisionRef.current = 0;
+      sessionRef.current += 1;
+      queueRef.current = Promise.resolve();
+      lastQueuedRevisionRef.current = 0;
+      pendingCountRef.current = 0;
+      setState({ document: null, status: 'waiting', error: null });
     }
   }, [isRecording]);
+
+  useEffect(() => {
+    if (!isRecording || isPaused) return;
+    const revision = completedTurnRevision(transcripts);
+    if (revision <= lastQueuedRevisionRef.current) return;
+
+    lastQueuedRevisionRef.current = revision;
+    const snapshot = [...transcripts];
+    const session = sessionRef.current;
+    pendingCountRef.current += 1;
+    setState((current) => ({ ...current, status: 'generating', error: null }));
+    queueRef.current = queueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        let disabled = false;
+        try {
+          const settings = await meetingIntelligenceService.getSettings();
+          if (!settings.intelligentTranscriptEnabled) {
+            disabled = true;
+            return;
+          }
+          const meetingFolder = await invoke<string>('get_meeting_folder_path');
+          const response = await meetingIntelligenceService.generateLive(meetingFolder, snapshot);
+          if (session === sessionRef.current) {
+            setState((current) => ({ ...current, document: response.document, error: null }));
+          }
+        } catch (error) {
+          console.warn('Failed to refine completed transcript turn:', error);
+          if (session === sessionRef.current) {
+            setState((current) => ({ ...current, error: String(error) }));
+          }
+        } finally {
+          if (session !== sessionRef.current) return;
+          pendingCountRef.current = Math.max(0, pendingCountRef.current - 1);
+          setState((current) => ({
+            ...current,
+            status: disabled
+              ? 'idle'
+              : pendingCountRef.current > 0
+                ? 'generating'
+                : current.error
+                  ? 'error'
+                  : current.document
+                    ? 'ready'
+                    : 'waiting',
+          }));
+        }
+      });
+  }, [isPaused, isRecording, transcripts]);
+
+  return state;
 }

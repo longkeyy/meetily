@@ -127,3 +127,19 @@ pub async fn api_regenerate_intelligent_transcript<R: Runtime>(
     )
     .await
 }
+
+#[tauri::command]
+pub async fn api_finalize_intelligent_transcript<R: Runtime>(
+    app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<IntelligentTranscriptDocument, String> {
+    let intelligence_settings = settings::load_settings(&app);
+    service::finalize_for_meeting(
+        &app,
+        state.db_manager.pool(),
+        &meeting_id,
+        &intelligence_settings.intelligent_transcript_prompt,
+    )
+    .await
+}

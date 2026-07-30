@@ -10,7 +10,17 @@ pub const DEFAULT_REALTIME_SUMMARY_INTERVAL_SECONDS: u32 = 120;
 pub const MIN_REALTIME_SUMMARY_INTERVAL_SECONDS: u32 = 60;
 pub const MAX_REALTIME_SUMMARY_INTERVAL_SECONDS: u32 = 1_800;
 
-pub const DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT: &str = r#"你是会议智能记录助手。你永远不回应会议参与者，只整理输入的原始转录，并直接输出完整的会议详细记录。
+pub const DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT: &str = r#"你是会议转写整理助手。你永远不回应会议参与者，只整理输入中一个已经结束的单方发言轮次，并直接输出整理后的文本。
+
+要求：
+1. 去除“呃”“嗯”“你知道的”等填充词，以及无意义重复和口吃。
+2. 识别说话人的自我更正，只保留最终表达的意图。
+3. 将口述的列表、步骤和要点整理为清晰、易读的文本，但不要总结或省略有效信息。
+4. 保留原有语气、事实、数字、专有名词、问题、回答、决定和未解决事项，不得杜撰。
+5. 不添加讽刺、情绪化评价、能力判断或会议中没有出现的主观旁白。
+6. 发言来源由应用固定管理；不要输出 speaker/mic 标签、标题或处理说明，只输出本轮整理后的内容。"#;
+
+const LEGACY_INTELLIGENT_TRANSCRIPT_PROMPT: &str = r#"你是会议智能记录助手。你永远不回应会议参与者，只整理输入的原始转录，并直接输出完整的会议详细记录。
 
 要求：
 1. 按会议实际发生顺序，用连贯、专业、易读的叙述记录讨论流程。
@@ -257,10 +267,14 @@ pub fn load_settings<R: Runtime>(app: &AppHandle<R>) -> MeetingIntelligenceSetti
     let Ok(store) = app.store(STORE_FILE) else {
         return MeetingIntelligenceSettings::default();
     };
-    store
+    let mut settings: MeetingIntelligenceSettings = store
         .get(STORE_KEY)
         .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if settings.intelligent_transcript_prompt == LEGACY_INTELLIGENT_TRANSCRIPT_PROMPT {
+        settings.intelligent_transcript_prompt = DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT.to_string();
+    }
+    settings
 }
 
 pub fn save_settings<R: Runtime>(
@@ -297,6 +311,16 @@ mod tests {
         assert!(prompt.contains("mic"));
         assert!(prompt.contains("不得杜撰"));
         assert!(prompt.contains("主观旁白"));
+    }
+
+    #[test]
+    fn legacy_default_prompt_has_an_exact_migration_target() {
+        assert_ne!(
+            LEGACY_INTELLIGENT_TRANSCRIPT_PROMPT,
+            DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT
+        );
+        assert!(LEGACY_INTELLIGENT_TRANSCRIPT_PROMPT.contains("完整的会议详细记录"));
+        assert!(DEFAULT_INTELLIGENT_TRANSCRIPT_PROMPT.contains("一个已经结束的单方发言轮次"));
     }
 
     #[test]

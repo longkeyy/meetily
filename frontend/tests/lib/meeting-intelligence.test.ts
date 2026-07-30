@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
   formatSummaryTime,
+  refinedTranscriptText,
   realtimeSummaryMarkdown,
 } from '../../src/types/meeting-intelligence';
-import type { RealtimeSummaryDocument } from '../../src/types/meeting-intelligence';
+import { completedTurnRevision } from '../../src/lib/refined-transcript';
+import type { IntelligentTranscriptDocument, RealtimeSummaryDocument } from '../../src/types/meeting-intelligence';
+import type { Transcript } from '../../src/types';
 
 describe('realtime summary presentation', () => {
   test('formats minute and hour timestamps', () => {
@@ -52,6 +55,83 @@ describe('realtime summary presentation', () => {
 
     expect(realtimeSummaryMarkdown(document)).toBe(
       '## 00:00 - 02:00\n\nFirst topic\n\n## 02:00 - 03:00\n\nSecond topic',
+    );
+  });
+});
+
+describe('refined transcript turns', () => {
+  const transcript = (sequenceId: number, source: 'mic' | 'system', text = 'text'): Transcript => ({
+    id: `segment-${sequenceId}`,
+    text,
+    timestamp: '12:00:00',
+    sequence_id: sequenceId,
+    source,
+  });
+
+  test('closes only turns followed by a different source', () => {
+    expect(completedTurnRevision([
+      transcript(1, 'system'),
+      transcript(2, 'system'),
+    ])).toBe(0);
+    expect(completedTurnRevision([
+      transcript(1, 'system'),
+      transcript(2, 'system'),
+      transcript(3, 'mic'),
+    ])).toBe(2);
+    expect(completedTurnRevision([
+      transcript(1, 'system'),
+      transcript(2, 'mic'),
+      transcript(3, 'system'),
+    ])).toBe(2);
+  });
+
+  test('ignores partial and empty transcripts at a source boundary', () => {
+    expect(completedTurnRevision([
+      transcript(1, 'system'),
+      { ...transcript(2, 'mic'), is_partial: true },
+      transcript(3, 'mic', '   '),
+    ])).toBe(0);
+  });
+
+  test('copies turns with stable timestamps and source labels', () => {
+    const document: IntelligentTranscriptDocument = {
+      version: 2,
+      coveredUntil: 8,
+      sourceRevision: 2,
+      updatedAt: '2026-07-30T00:00:00Z',
+      turns: [
+        {
+          schemaVersion: 1,
+          turnId: 'speaker-turn',
+          source: 'speaker',
+          startSeconds: 1,
+          endSeconds: 4,
+          sourceRevisionStart: 1,
+          sourceRevisionEnd: 1,
+          rawText: 'raw question',
+          content: 'Refined question',
+          createdAt: '2026-07-30T00:00:00Z',
+          model: { provider: 'ollama', model: 'test' },
+          promptHash: 'sha256:test',
+        },
+        {
+          schemaVersion: 1,
+          turnId: 'mic-turn',
+          source: 'mic',
+          startSeconds: 5,
+          endSeconds: 8,
+          sourceRevisionStart: 2,
+          sourceRevisionEnd: 2,
+          rawText: 'raw answer',
+          content: 'Refined answer',
+          createdAt: '2026-07-30T00:00:01Z',
+          model: { provider: 'ollama', model: 'test' },
+          promptHash: 'sha256:test',
+        },
+      ],
+    };
+    expect(refinedTranscriptText(document)).toBe(
+      '[00:01] speaker: Refined question\n\n[00:05] mic: Refined answer',
     );
   });
 });

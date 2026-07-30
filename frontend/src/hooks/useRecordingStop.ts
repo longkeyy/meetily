@@ -270,12 +270,12 @@ export function useRecordingStop(
           try {
             intelligenceSettings = await meetingIntelligenceService.getSettings();
             if (intelligenceSettings.intelligentTranscriptEnabled && freshTranscripts.length > 0) {
-              setStatus(RecordingStatus.SAVING, 'Generating intelligent detailed record...');
-              await meetingIntelligenceService.regenerateForMeeting(meetingId);
+              setStatus(RecordingStatus.SAVING, 'Finalizing refined record...');
+              await meetingIntelligenceService.finalizeForMeeting(meetingId);
             }
           } catch (error) {
-            console.warn('Failed to finalize intelligent detailed record:', error);
-            toast.warning('Meeting saved without an intelligent detailed record', {
+            console.warn('Failed to finalize refined record:', error);
+            toast.warning('Meeting saved without a complete refined record', {
               description: 'You can regenerate it from the meeting details page.',
             });
           }
