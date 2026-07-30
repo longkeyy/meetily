@@ -62,6 +62,7 @@ export function useConversationAssistant({
   const speakerActiveRef = useRef(false);
   const micActiveRef = useRef(false);
   const speakerTurnStartRef = useRef<number | null>(null);
+  const speakerTurnWallStartRef = useRef<number | null>(null);
   const requestCounterRef = useRef(0);
   const activeRequestIdRef = useRef<string | null>(null);
   const pendingTriggersRef = useRef<AssistantTriggerCheckpoint[]>([]);
@@ -223,9 +224,17 @@ export function useConversationAssistant({
   const schedulePeriodicTrigger = useCallback((turnStartTime: number) => {
     clearTimer(periodicTimerRef);
     const intervalSeconds = settingsRef.current.intervalSeconds;
-    let targetEndTime = turnStartTime + intervalSeconds;
+    const wallStart = speakerTurnWallStartRef.current ?? Date.now();
+    speakerTurnWallStartRef.current = wallStart;
+    const elapsedSeconds = Math.max(0, (Date.now() - wallStart) / 1_000);
+    let checkpointIndex = elapsedSeconds >= intervalSeconds
+      ? Math.max(1, Math.floor(elapsedSeconds / intervalSeconds))
+      : 1;
 
     const scheduleNext = () => {
+      const targetEndTime = turnStartTime + checkpointIndex * intervalSeconds;
+      const targetWallTime = wallStart + checkpointIndex * intervalSeconds * 1_000;
+      const delayMs = Math.max(0, targetWallTime - Date.now());
       periodicTimerRef.current = setTimeout(() => {
         periodicTimerRef.current = null;
         if (!speakerActiveRef.current || micActiveRef.current || !stateRef.current.enabled) return;
@@ -234,9 +243,9 @@ export function useConversationAssistant({
           periodicSuggestionTrigger(turnStartTime, targetEndTime),
         );
         tryRunPendingTrigger();
-        targetEndTime += intervalSeconds;
+        checkpointIndex += 1;
         scheduleNext();
-      }, intervalSeconds * 1_000);
+      }, delayMs);
     };
 
     scheduleNext();
@@ -246,6 +255,7 @@ export function useConversationAssistant({
     clearTimer(periodicTimerRef);
     if (micActiveRef.current || !stateRef.current.enabled) {
       speakerTurnStartRef.current = null;
+      speakerTurnWallStartRef.current = null;
       pendingTriggersRef.current = [];
       return;
     }
@@ -253,6 +263,7 @@ export function useConversationAssistant({
     const turnStartTime = speakerTurnStartRef.current
       ?? Math.max(0, turnEndTime - settingsRef.current.intervalSeconds);
     speakerTurnStartRef.current = null;
+    speakerTurnWallStartRef.current = null;
     pendingTriggersRef.current = enqueueSuggestionTrigger(
       pendingTriggersRef.current,
       turnEndSuggestionTrigger(turnStartTime, turnEndTime),
@@ -264,6 +275,62 @@ export function useConversationAssistant({
       FINAL_TRANSCRIPT_WAIT_MS,
     );
   }, [clearTimer, tryRunPendingTrigger]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void listen<AssistantSettings>('assistant-settings-updated', (event) => {
+      const updated = event.payload;
+      settingsRef.current = updated;
+      setAssistantSettings(updated);
+      pendingTriggersRef.current = [];
+      dispatch({
+        type: 'settingsLoaded',
+        enabled: updated.enabledByDefault,
+        profile: updated.profile,
+      });
+
+      if (!updated.enabledByDefault) {
+        clearPendingWork();
+        cancelGeneration();
+      } else if (speakerActiveRef.current && !micActiveRef.current && speakerTurnStartRef.current !== null) {
+        schedulePeriodicTrigger(speakerTurnStartRef.current);
+      }
+    }).then((dispose) => {
+      if (disposed) {
+        void dispose();
+      } else {
+        unlisten = dispose;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [cancelGeneration, clearPendingWork, schedulePeriodicTrigger]);
+
+  useEffect(() => {
+    if (!isRecording) return;
+    let disposed = false;
+    void assistantSettingsService.get()
+      .then((updated) => {
+        if (disposed) return;
+        settingsRef.current = updated;
+        setAssistantSettings(updated);
+        dispatch({
+          type: 'settingsLoaded',
+          enabled: updated.enabledByDefault,
+          profile: updated.profile,
+        });
+        if (updated.enabledByDefault && speakerActiveRef.current && !micActiveRef.current && speakerTurnStartRef.current !== null) {
+          schedulePeriodicTrigger(speakerTurnStartRef.current);
+        }
+      })
+      .catch((error) => console.error('Failed to refresh assistant settings for recording:', error));
+    return () => {
+      disposed = true;
+    };
+  }, [isRecording, schedulePeriodicTrigger]);
 
   useEffect(() => {
     if (!isRecording) return;
@@ -280,6 +347,7 @@ export function useConversationAssistant({
           cancelGeneration();
         } else if (speakerActiveRef.current && stateRef.current.enabled) {
           speakerTurnStartRef.current = activity.timestamp;
+          speakerTurnWallStartRef.current = Date.now();
           schedulePeriodicTrigger(activity.timestamp);
         }
         return;
@@ -292,6 +360,7 @@ export function useConversationAssistant({
         const isNewTurn = speakerTurnStartRef.current === null;
         if (isNewTurn) {
           speakerTurnStartRef.current = activity.timestamp;
+          speakerTurnWallStartRef.current = Date.now();
         }
         if (stateRef.current.enabled && !micActiveRef.current) {
           if (isNewTurn) cancelGeneration();
@@ -335,6 +404,7 @@ export function useConversationAssistant({
       speakerActiveRef.current = false;
       micActiveRef.current = false;
       speakerTurnStartRef.current = null;
+      speakerTurnWallStartRef.current = null;
       dispatch({ type: 'reset' });
     }
   }, [cancelGeneration, clearPendingWork, isPaused, isRecording]);

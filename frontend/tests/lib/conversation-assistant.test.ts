@@ -111,6 +111,15 @@ describe('conversation assistant trigger schedule', () => {
     });
   });
 
+  test('accepts a 15 second interval checkpoint', () => {
+    const pending = enqueueSuggestionTrigger([], periodicSuggestionTrigger(5, 20));
+    expect(takeReadySuggestionTrigger(pending, 18.5, 1.5)?.trigger).toEqual({
+      trigger: 'periodic',
+      focusStartTime: 5,
+      targetEndTime: 20,
+    });
+  });
+
   test('turn end supersedes an unconsumed checkpoint and refreshes at 70 seconds', () => {
     let pending = enqueueSuggestionTrigger([], periodicSuggestionTrigger(0, 60));
     pending = enqueueSuggestionTrigger(pending, turnEndSuggestionTrigger(0, 70));

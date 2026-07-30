@@ -3,7 +3,7 @@ use anyhow::{anyhow, Result};
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_store::StoreExt;
 
 const STORE_FILE: &str = "assistant_settings.json";
@@ -188,11 +188,14 @@ pub async fn save_assistant_settings<R: Runtime>(
     store
         .save()
         .map_err(|error| format!("Failed to persist assistant settings: {error}"))?;
+    let view = settings.to_view(true);
+    app.emit("assistant-settings-updated", view.clone())
+        .map_err(|error| format!("Failed to broadcast assistant settings: {error}"))?;
     info!(
         "Saved assistant settings: profile={:?}, interval={}s, model_mode={:?}",
         settings.active_profile, settings.interval_seconds, settings.model_mode
     );
-    Ok(settings.to_view(true))
+    Ok(view)
 }
 
 fn load_settings_state<R: Runtime>(app: &AppHandle<R>) -> (AssistantSettings, bool) {
