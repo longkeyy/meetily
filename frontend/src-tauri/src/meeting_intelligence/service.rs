@@ -362,17 +362,17 @@ fn chunk_text(text: &str, max_chars: usize) -> Vec<String> {
     if text.chars().count() <= max_chars {
         return vec![text.to_string()];
     }
+
     let mut chunks = Vec::new();
     let mut current = String::new();
-    for word in text.split_whitespace() {
-        let additional = word.chars().count() + usize::from(!current.is_empty());
-        if !current.is_empty() && current.chars().count() + additional > max_chars {
+    let mut current_chars = 0;
+    for character in text.chars() {
+        if current_chars == max_chars {
             chunks.push(std::mem::take(&mut current));
+            current_chars = 0;
         }
-        if !current.is_empty() {
-            current.push(' ');
-        }
-        current.push_str(word);
+        current.push(character);
+        current_chars += 1;
     }
     if !current.is_empty() {
         chunks.push(current);
@@ -812,5 +812,13 @@ mod tests {
         assert_eq!(prompt_hash("same"), prompt_hash("same"));
         assert_ne!(prompt_hash("same"), prompt_hash("different"));
         assert!(prompt_hash("same").starts_with("sha256:"));
+    }
+
+    #[test]
+    fn chunks_continuous_chinese_text_at_the_character_limit() {
+        let input = "这是一个没有空格的中文长句";
+        let chunks = chunk_text(input, 4);
+        assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 4));
+        assert_eq!(chunks.concat(), input);
     }
 }
