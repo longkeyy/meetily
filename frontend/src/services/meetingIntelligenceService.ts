@@ -54,6 +54,10 @@ export const meetingIntelligenceService = {
     return invoke('api_regenerate_intelligent_transcript', { meetingId });
   },
 
+  finalizeForMeeting(meetingId: string): Promise<IntelligentTranscriptDocument> {
+    return invoke('api_finalize_intelligent_transcript', { meetingId });
+  },
+
   async generateRealtime(
     meetingFolder: string,
     transcripts: Transcript[],

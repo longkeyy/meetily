@@ -138,7 +138,7 @@ export function MeetingIntelligenceSettings() {
     <div className="flex flex-col gap-4 pb-8">
       <section className="border-b border-gray-200 py-6">
         <h3 className="text-lg font-semibold text-gray-900">Meeting Notes Model</h3>
-        <p className="mt-1 text-sm text-gray-600">Used by both the detailed record and realtime summary.</p>
+        <p className="mt-1 text-sm text-gray-600">Choose an independent model or reuse only the provider and model configured for Auto Summary. Each notes feature keeps its own prompt and output.</p>
         <div className="mt-4 inline-flex rounded-md border border-gray-200 bg-gray-50 p-1">
           <Button
             type="button"
@@ -258,13 +258,13 @@ export function MeetingIntelligenceSettings() {
       <section className="border-b border-gray-200 py-6">
         <div className="flex items-center justify-between gap-6">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Intelligent Detailed Record</h3>
-            <p className="mt-1 text-sm text-gray-600">Create a cleaned, chronological record while preserving speaker and mic roles.</p>
+            <h3 className="text-lg font-semibold text-gray-900">Refined Record</h3>
+            <p className="mt-1 text-sm text-gray-600">Clean each completed speaker or mic turn without changing its source, meaning, or tone.</p>
           </div>
           <Switch
             checked={settings.intelligentTranscriptEnabled}
             onCheckedChange={(enabled) => update('intelligentTranscriptEnabled', enabled)}
-            aria-label="Enable intelligent detailed record"
+            aria-label="Enable refined record"
           />
         </div>
       </section>
@@ -311,7 +311,7 @@ export function MeetingIntelligenceSettings() {
         onChange={(value) => update('realtimeSummaryPrompt', value)}
       />
       <PromptEditor
-        title="Detailed Record Prompt"
+        title="Refined Record Prompt"
         value={settings.intelligentTranscriptPrompt}
         defaultValue={settings.defaultIntelligentTranscriptPrompt}
         rows={16}

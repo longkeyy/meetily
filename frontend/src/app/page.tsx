@@ -64,7 +64,7 @@ export default function Home() {
   } = useTranscriptRecovery();
 
   const router = useRouter();
-  useIntelligentTranscriptRecorder();
+  const refinedTranscript = useIntelligentTranscriptRecorder();
 
   useEffect(() => {
     // Track page view
@@ -221,6 +221,7 @@ export default function Home() {
           isProcessingStop={isProcessingStop}
           isStopping={isStopping}
           showModal={showModal}
+          refinedTranscript={refinedTranscript}
         />
 
         {recordingState.isRecording && <RealtimeSummaryPanel />}

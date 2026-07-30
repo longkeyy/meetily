@@ -37,10 +37,28 @@ export interface MeetingIntelligenceSettingsUpdate {
 
 export interface IntelligentTranscriptDocument {
   version: number;
-  markdown: string;
+  turns: IntelligentTranscriptTurn[];
   coveredUntil: number;
   sourceRevision: number;
   updatedAt: string;
+}
+
+export interface IntelligentTranscriptTurn {
+  schemaVersion: number;
+  turnId: string;
+  source: 'speaker' | 'mic';
+  startSeconds: number;
+  endSeconds: number;
+  sourceRevisionStart: number;
+  sourceRevisionEnd: number;
+  rawText: string;
+  content: string;
+  createdAt: string;
+  model: {
+    provider: string;
+    model: string;
+  };
+  promptHash: string;
 }
 
 export interface IntelligentTranscriptResponse {
@@ -96,6 +114,12 @@ export interface GenerateIntelligentTranscriptRequest {
 
 export interface GenerateRealtimeSummaryRequest extends GenerateIntelligentTranscriptRequest {
   trigger?: RealtimeSummaryTrigger;
+}
+
+export function refinedTranscriptText(document: IntelligentTranscriptDocument): string {
+  return document.turns
+    .map((turn) => `[${formatSummaryTime(turn.startSeconds)}] ${turn.source}: ${turn.content}`)
+    .join('\n\n');
 }
 
 export function realtimeSummaryMarkdown(document: RealtimeSummaryDocument): string {

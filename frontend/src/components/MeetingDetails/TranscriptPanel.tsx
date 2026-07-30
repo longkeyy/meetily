@@ -1,16 +1,13 @@
 "use client";
 
 import { Transcript, TranscriptSegmentData } from '@/types';
-import { TranscriptView } from '@/components/TranscriptView';
 import { VirtualizedTranscriptView } from '@/components/VirtualizedTranscriptView';
 import { TranscriptButtonGroup } from './TranscriptButtonGroup';
 import { useEffect, useMemo, useState } from 'react';
 import { FileText, LoaderCircle, RefreshCw, Rows3 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { meetingIntelligenceService } from '@/services/meetingIntelligenceService';
-import { IntelligentTranscriptDocument } from '@/types/meeting-intelligence';
+import { IntelligentTranscriptDocument, refinedTranscriptText } from '@/types/meeting-intelligence';
 import { Button } from '@/components/ui/button';
 
 interface TranscriptPanelProps {
@@ -56,9 +53,9 @@ export function TranscriptPanel({
   meetingFolderPath,
   onRefetchTranscripts,
 }: TranscriptPanelProps) {
-  const [view, setView] = useState<'raw' | 'detailed'>('raw');
-  const [detailedRecord, setDetailedRecord] = useState<IntelligentTranscriptDocument | null>(null);
-  const [isLoadingDetailed, setIsLoadingDetailed] = useState(false);
+  const [view, setView] = useState<'original' | 'refined'>('original');
+  const [refinedRecord, setRefinedRecord] = useState<IntelligentTranscriptDocument | null>(null);
+  const [isLoadingRefined, setIsLoadingRefined] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
   // Convert transcripts to segments if pagination is not used but we want virtualization
@@ -77,17 +74,25 @@ export function TranscriptPanel({
     }));
   }, [transcripts, usePagination, segments]);
 
+  const refinedSegments = useMemo(() => refinedRecord?.turns.map((turn) => ({
+    id: turn.turnId,
+    timestamp: turn.startSeconds,
+    endTime: turn.endSeconds,
+    text: turn.content,
+    source: turn.source === 'mic' ? 'mic' as const : 'system' as const,
+  })) ?? [], [refinedRecord]);
+
   useEffect(() => {
     if (!meetingId) return;
     let disposed = false;
-    setIsLoadingDetailed(true);
+    setIsLoadingRefined(true);
     void meetingIntelligenceService.getForMeeting(meetingId)
       .then((document) => {
-        if (!disposed) setDetailedRecord(document);
+        if (!disposed) setRefinedRecord(document);
       })
-      .catch((error) => console.warn('Failed to load intelligent detailed record:', error))
+      .catch((error) => console.warn('Failed to load refined record:', error))
       .finally(() => {
-        if (!disposed) setIsLoadingDetailed(false);
+        if (!disposed) setIsLoadingRefined(false);
       });
     return () => {
       disposed = true;
@@ -95,49 +100,49 @@ export function TranscriptPanel({
   }, [meetingId]);
 
   const copyCurrentView = async () => {
-    if (view === 'raw') {
+    if (view === 'original') {
       onCopyTranscript();
       return;
     }
-    if (!detailedRecord?.markdown) return;
-    await navigator.clipboard.writeText(detailedRecord.markdown);
-    toast.success('Detailed record copied');
+    if (!refinedRecord) return;
+    await navigator.clipboard.writeText(refinedTranscriptText(refinedRecord));
+    toast.success('Refined record copied');
   };
 
-  const regenerateDetailedRecord = async () => {
+  const regenerateRefinedRecord = async () => {
     if (!meetingId) return;
     setIsRegenerating(true);
     try {
       const document = await meetingIntelligenceService.regenerateForMeeting(meetingId);
-      setDetailedRecord(document);
-      toast.success('Detailed record regenerated');
+      setRefinedRecord(document);
+      toast.success('Refined record regenerated');
     } catch (error) {
-      toast.error('Failed to regenerate detailed record', { description: String(error) });
+      toast.error('Failed to regenerate refined record', { description: String(error) });
     } finally {
       setIsRegenerating(false);
     }
   };
 
   return (
-    <div className="hidden md:flex md:w-1/4 lg:w-1/3 min-w-0 border-r border-gray-200 bg-white flex-col relative shrink-0">
+    <div className="flex w-full min-w-0 shrink-0 flex-col border-r border-gray-200 bg-white md:w-1/4 lg:w-1/3">
       {/* Title area */}
       <div className="p-4 border-b border-gray-200">
         <div className="mb-3 grid grid-cols-2 rounded-md border border-gray-200 bg-gray-50 p-1">
           <button
             type="button"
-            onClick={() => setView('raw')}
-            className={`flex h-8 items-center justify-center gap-2 rounded text-sm ${view === 'raw' ? 'bg-white font-medium text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            onClick={() => setView('original')}
+            className={`flex h-8 items-center justify-center gap-2 rounded text-sm ${view === 'original' ? 'bg-white font-medium text-gray-900 shadow-sm' : 'text-gray-500'}`}
           >
             <Rows3 className="size-4" aria-hidden="true" />
-            Raw
+            Original
           </button>
           <button
             type="button"
-            onClick={() => setView('detailed')}
-            className={`flex h-8 items-center justify-center gap-2 rounded text-sm ${view === 'detailed' ? 'bg-white font-medium text-gray-900 shadow-sm' : 'text-gray-500'}`}
+            onClick={() => setView('refined')}
+            className={`flex h-8 items-center justify-center gap-2 rounded text-sm ${view === 'refined' ? 'bg-white font-medium text-gray-900 shadow-sm' : 'text-gray-500'}`}
           >
             <FileText className="size-4" aria-hidden="true" />
-            Detailed
+            Refined
           </button>
         </div>
         <TranscriptButtonGroup
@@ -152,7 +157,7 @@ export function TranscriptPanel({
 
       {/* Transcript content - use virtualized view for better performance */}
       <div className="flex-1 overflow-hidden pb-4">
-        {view === 'raw' ? <VirtualizedTranscriptView
+        {view === 'original' ? <VirtualizedTranscriptView
           segments={convertedSegments}
           isRecording={isRecording}
           isPaused={false}
@@ -167,47 +172,53 @@ export function TranscriptPanel({
           loadedCount={loadedCount}
           onLoadMore={onLoadMore}
         /> : (
-          <div className="h-full overflow-y-auto px-5 py-4">
-            {isLoadingDetailed ? (
+          <div className="flex h-full min-h-0 flex-col px-5 py-4">
+            {isLoadingRefined ? (
               <div className="flex h-32 items-center justify-center text-sm text-gray-500">
                 <LoaderCircle className="mr-2 size-4 animate-spin" aria-hidden="true" />
-                Loading detailed record...
+                Loading refined record...
               </div>
-            ) : detailedRecord ? (
+            ) : refinedRecord ? (
               <>
                 <div className="mb-4 flex items-center justify-between gap-3 text-xs text-gray-500">
-                  <span>Updated {new Date(detailedRecord.updatedAt).toLocaleString()}</span>
+                  <span>Updated {new Date(refinedRecord.updatedAt).toLocaleString()}</span>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     className="size-8"
-                    onClick={regenerateDetailedRecord}
+                    onClick={regenerateRefinedRecord}
                     disabled={isRegenerating}
-                    title="Regenerate detailed record"
+                    title="Regenerate refined record"
                   >
                     <RefreshCw className={`size-4 ${isRegenerating ? 'animate-spin' : ''}`} aria-hidden="true" />
-                    <span className="sr-only">Regenerate detailed record</span>
+                    <span className="sr-only">Regenerate refined record</span>
                   </Button>
                 </div>
-                <div className="prose prose-sm max-w-none text-gray-800 prose-headings:text-gray-900">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{detailedRecord.markdown}</ReactMarkdown>
+                <div className="min-h-0 flex-1">
+                  <VirtualizedTranscriptView
+                    segments={refinedSegments}
+                    isRecording={false}
+                    enableStreaming={false}
+                    showConfidence={false}
+                    disableAutoScroll
+                  />
                 </div>
               </>
             ) : (
               <div className="flex h-full min-h-48 flex-col items-center justify-center text-center">
                 <FileText className="size-6 text-gray-400" aria-hidden="true" />
-                <p className="mt-3 text-sm font-medium text-gray-700">No detailed record yet</p>
+                <p className="mt-3 text-sm font-medium text-gray-700">No refined record yet</p>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="mt-4"
-                  onClick={regenerateDetailedRecord}
+                  onClick={regenerateRefinedRecord}
                   disabled={isRegenerating || !meetingId}
                 >
                   {isRegenerating && <LoaderCircle className="mr-2 size-4 animate-spin" aria-hidden="true" />}
-                  Generate detailed record
+                  Generate refined record
                 </Button>
               </div>
             )}
