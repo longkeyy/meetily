@@ -18,7 +18,7 @@ export function RealtimeSummaryPanel() {
   };
 
   return (
-    <aside className="hidden w-[360px] shrink-0 flex-col border-l border-gray-200 bg-white xl:flex">
+    <aside className="hidden w-[360px] shrink-0 flex-col border-l border-gray-200 bg-white lg:flex">
       <div className="flex h-14 items-center justify-between border-b border-gray-200 px-4">
         <div>
           <h2 className="text-sm font-semibold text-gray-900">Realtime Summary</h2>
