@@ -25,6 +25,7 @@ import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcess
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import { usePathname } from 'next/navigation'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -63,7 +64,7 @@ function ConditionalImportDialog({
 
 // export { metadata } from './metadata'
 
-export default function RootLayout({
+function MainApplicationLayout({
   children,
 }: {
   children: React.ReactNode
@@ -280,4 +281,25 @@ export default function RootLayout({
       </body>
     </html>
   )
+}
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const pathname = usePathname()
+
+  if (pathname.startsWith('/assistant-overlay')) {
+    return (
+      <html lang="en">
+        <body className={`${sourceSans3.variable} bg-white font-sans antialiased`}>
+          <TooltipProvider>{children}</TooltipProvider>
+          <Toaster position="bottom-center" richColors closeButton />
+        </body>
+      </html>
+    )
+  }
+
+  return <MainApplicationLayout>{children}</MainApplicationLayout>
 }

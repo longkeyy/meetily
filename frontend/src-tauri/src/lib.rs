@@ -532,12 +532,16 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
+                if window.label() == "main" || window.label() == "realtime-assistant" {
                     api.prevent_close();
                     if let Err(e) = window.hide() {
-                        log::error!("Failed to hide main window on close request: {}", e);
+                        log::error!(
+                            "Failed to hide {} window on close request: {}",
+                            window.label(),
+                            e
+                        );
                     } else {
-                        log::info!("Main window hidden to tray on close request");
+                        log::info!("{} window hidden on close request", window.label());
                     }
                 }
             }

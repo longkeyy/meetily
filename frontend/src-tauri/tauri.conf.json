@@ -12,6 +12,7 @@
     "app": {
         "windows": [
             {
+                "label": "main",
                 "title": "meetily",
                 "width": 1100,
                 "height": 700,
@@ -19,6 +20,25 @@
                 "fullscreen": false,
                 "theme": "Light",
                 "decorations": true
+            },
+            {
+                "label": "realtime-assistant",
+                "title": "Realtime Assistant",
+                "url": "/assistant-overlay",
+                "width": 500,
+                "height": 170,
+                "minWidth": 380,
+                "minHeight": 128,
+                "resizable": true,
+                "maximizable": false,
+                "minimizable": false,
+                "fullscreen": false,
+                "focus": false,
+                "theme": "Light",
+                "decorations": false,
+                "alwaysOnTop": true,
+                "visible": false,
+                "skipTaskbar": true
             }
         ],
         "macOSPrivateApi": true,
@@ -60,6 +80,9 @@
                         "core:menu:default",
                         "core:tray:default",
                         "core:window:allow-set-title",
+                        "core:window:allow-show",
+                        "core:window:allow-hide",
+                        "core:window:allow-set-focus",
                         "store:default",
                         "notification:default",
                         "notification:allow-is-permission-granted",
@@ -73,6 +96,21 @@
                                 }
                             ]
                         }
+                    ]
+                },
+                {
+                    "identifier": "realtime-assistant",
+                    "description": "Realtime Assistant floating window capability",
+                    "windows": [
+                        "realtime-assistant"
+                    ],
+                    "permissions": [
+                        "core:event:default",
+                        "core:window:default",
+                        "core:window:allow-hide",
+                        "core:window:allow-set-always-on-top",
+                        "core:window:allow-set-position",
+                        "core:window:allow-start-dragging"
                     ]
                 }
             ]

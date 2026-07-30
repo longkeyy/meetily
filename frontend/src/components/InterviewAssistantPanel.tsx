@@ -1,17 +1,29 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Copy, LoaderCircle, Mic2, RefreshCw, Sparkles, Volume2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { emitTo, listen } from '@tauri-apps/api/event';
+import { Window } from '@tauri-apps/api/window';
+import { Copy, LoaderCircle, Mic2, PictureInPicture2, RefreshCw, Sparkles, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useTranscripts } from '@/contexts/TranscriptContext';
 import {
-  AssistantScheduleState,
   useConversationAssistant,
 } from '@/hooks/useConversationAssistant';
-import { AssistantState } from '@/lib/conversation-assistant';
+import type { AssistantScheduleState } from '@/hooks/useConversationAssistant';
+import type { AssistantState } from '@/lib/conversation-assistant';
 import { activeAssistantProfile } from '@/types/assistant-settings';
+import {
+  REALTIME_ASSISTANT_ACTION_EVENT,
+  REALTIME_ASSISTANT_STATE_EVENT,
+  REALTIME_ASSISTANT_WINDOW_LABEL,
+} from '@/types/realtime-assistant-overlay';
+import type {
+  RealtimeAssistantSnapshot,
+  RealtimeAssistantWindowAction,
+} from '@/types/realtime-assistant-overlay';
 import { Button } from './ui/button';
 import { Switch } from './ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -49,9 +61,7 @@ export function RealtimeAssistantPanel() {
     transcripts,
   });
 
-  if (!isRecording) return null;
-
-  const handleEnabledChange = (enabled: boolean) => {
+  const handleEnabledChange = useCallback((enabled: boolean) => {
     const profile = activeAssistantProfile(settings);
     const effectiveProvider = profile.modelMode === 'custom'
       ? profile.provider
@@ -67,12 +77,77 @@ export function RealtimeAssistantPanel() {
       }
     }
     setEnabled(enabled);
-  };
+  }, [modelConfig.provider, setEnabled, settings]);
+
+  const snapshot = useMemo<RealtimeAssistantSnapshot>(() => ({
+    state,
+    profileName: activeAssistantProfile(settings).name,
+    scheduleState,
+    settingsReady,
+    hasTranscripts: transcripts.length > 0,
+  }), [scheduleState, settings, settingsReady, state, transcripts.length]);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+
+  const broadcastSnapshot = useCallback(async () => {
+    await emitTo(
+      REALTIME_ASSISTANT_WINDOW_LABEL,
+      REALTIME_ASSISTANT_STATE_EVENT,
+      snapshotRef.current,
+    );
+  }, []);
+
+  useEffect(() => {
+    void broadcastSnapshot();
+  }, [broadcastSnapshot, snapshot]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void listen<RealtimeAssistantWindowAction>(REALTIME_ASSISTANT_ACTION_EVENT, (event) => {
+      switch (event.payload.type) {
+        case 'requestState':
+          void broadcastSnapshot();
+          break;
+        case 'setEnabled':
+          handleEnabledChange(event.payload.enabled);
+          break;
+        case 'refresh':
+          refreshSuggestion();
+          break;
+      }
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlisten = dispose;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [broadcastSnapshot, handleEnabledChange, refreshSuggestion]);
+
+  useEffect(() => () => {
+    void Window.getByLabel(REALTIME_ASSISTANT_WINDOW_LABEL)
+      .then((assistantWindow) => assistantWindow?.hide());
+  }, []);
+
+  if (!isRecording) return null;
 
   const copySuggestion = async () => {
     if (!state.suggestion) return;
     await navigator.clipboard.writeText(state.suggestion);
     toast.success('Suggestion copied');
+  };
+
+  const openFloatingWindow = async () => {
+    const assistantWindow = await Window.getByLabel(REALTIME_ASSISTANT_WINDOW_LABEL);
+    if (!assistantWindow) {
+      toast.error('Realtime Assistant window is unavailable');
+      return;
+    }
+    await assistantWindow.show();
+    await assistantWindow.setFocus();
+    await broadcastSnapshot();
   };
 
   return (
@@ -85,6 +160,7 @@ export function RealtimeAssistantPanel() {
       onEnabledChange={handleEnabledChange}
       onRefresh={refreshSuggestion}
       onCopy={copySuggestion}
+      onOpenFloating={() => void openFloatingWindow()}
     />
   );
 }
@@ -98,6 +174,10 @@ interface RealtimeAssistantPanelViewProps {
   onEnabledChange: (enabled: boolean) => void;
   onRefresh: () => void;
   onCopy: () => void;
+  onOpenFloating?: () => void;
+  headerActions?: ReactNode;
+  onHeaderMouseDown?: React.MouseEventHandler<HTMLDivElement>;
+  className?: string;
 }
 
 export function RealtimeAssistantPanelView({
@@ -109,6 +189,10 @@ export function RealtimeAssistantPanelView({
   onEnabledChange,
   onRefresh,
   onCopy,
+  onOpenFloating,
+  headerActions,
+  onHeaderMouseDown,
+  className,
 }: RealtimeAssistantPanelViewProps) {
   const countdown = useCountdownSeconds(scheduleState.nextSuggestionAt);
   const status = state.micActive
@@ -125,8 +209,8 @@ export function RealtimeAssistantPanelView({
   const StatusIcon = status.icon;
 
   return (
-    <div className="w-full overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg">
-      <div className="flex h-12 items-center gap-3 px-3">
+    <div className={`w-full overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg ${className ?? ''}`}>
+      <div className="flex h-12 items-center gap-3 px-3" onMouseDown={onHeaderMouseDown}>
         <Sparkles className="size-4 shrink-0 text-emerald-600" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">
           Realtime Assistant
@@ -168,6 +252,24 @@ export function RealtimeAssistantPanelView({
             </Tooltip>
           </div>
         )}
+        {onOpenFloating && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                onClick={onOpenFloating}
+              >
+                <PictureInPicture2 className="size-4" aria-hidden="true" />
+                <span className="sr-only">Open floating window</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open floating window</TooltipContent>
+          </Tooltip>
+        )}
+        {headerActions}
         <Switch
           checked={state.enabled}
           onCheckedChange={onEnabledChange}
