@@ -12,6 +12,7 @@ import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import { meetingIntelligenceService } from '@/services/meetingIntelligenceService';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -263,6 +264,19 @@ export function useRecordingStop(
           if (!meetingId) {
             console.error('No meeting_id in response:', responseData);
             throw new Error('No meeting ID received from save operation');
+          }
+
+          try {
+            const intelligenceSettings = await meetingIntelligenceService.getSettings();
+            if (intelligenceSettings.intelligentTranscriptEnabled && freshTranscripts.length > 0) {
+              setStatus(RecordingStatus.SAVING, 'Generating intelligent detailed record...');
+              await meetingIntelligenceService.regenerateForMeeting(meetingId);
+            }
+          } catch (error) {
+            console.warn('Failed to finalize intelligent detailed record:', error);
+            toast.warning('Meeting saved without an intelligent detailed record', {
+              description: 'You can regenerate it from the meeting details page.',
+            });
           }
 
           let shouldDetectSummaryLanguage = false;

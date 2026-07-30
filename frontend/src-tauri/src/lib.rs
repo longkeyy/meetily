@@ -48,6 +48,7 @@ pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
+pub mod meeting_intelligence;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod qwen_asr_engine;
@@ -576,6 +577,11 @@ pub fn run() {
             assistant::commands::api_cancel_assistant_suggestion,
             assistant::commands::api_get_assistant_settings,
             assistant::commands::api_save_assistant_settings,
+            meeting_intelligence::commands::api_get_meeting_intelligence_settings,
+            meeting_intelligence::commands::api_save_meeting_intelligence_settings,
+            meeting_intelligence::commands::api_generate_intelligent_transcript,
+            meeting_intelligence::commands::api_get_intelligent_transcript,
+            meeting_intelligence::commands::api_regenerate_intelligent_transcript,
             whisper_engine::commands::whisper_init,
             whisper_engine::commands::whisper_get_available_models,
             whisper_engine::commands::whisper_load_model,

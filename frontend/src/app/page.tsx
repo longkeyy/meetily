@@ -22,6 +22,7 @@ import { indexedDBService } from '@/services/indexedDBService';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { InterviewAssistantPanel } from '@/components/InterviewAssistantPanel';
+import { useIntelligentTranscriptRecorder } from '@/hooks/useIntelligentTranscriptRecorder';
 
 export default function Home() {
   // Local page state (not moved to contexts)
@@ -62,6 +63,7 @@ export default function Home() {
   } = useTranscriptRecovery();
 
   const router = useRouter();
+  useIntelligentTranscriptRecorder();
 
   useEffect(() => {
     // Track page view
