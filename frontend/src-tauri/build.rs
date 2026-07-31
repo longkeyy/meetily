@@ -1,10 +1,13 @@
 #[path = "build/ffmpeg.rs"]
 mod ffmpeg;
+#[path = "build/sherpa_runtime.rs"]
+mod sherpa_runtime;
 
 fn main() {
     // GPU Acceleration Detection and Build Guidance
     detect_and_report_gpu_capabilities();
     validate_sherpa_cuda_packaging();
+    sherpa_runtime::prepare().expect("failed to prepare the sherpa-onnx runtime");
 
     #[cfg(target_os = "macos")]
     {
