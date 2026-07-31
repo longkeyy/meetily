@@ -2,6 +2,8 @@ use anyhow::{anyhow, Result};
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig};
 
 pub(crate) const SHERPA_PROVIDER_OVERRIDE_ENV: &str = "MEETILY_SHERPA_ONNX_PROVIDER";
+pub(crate) const SHERPA_THREADS_OVERRIDE_ENV: &str = "MEETILY_SHERPA_ONNX_THREADS";
+pub(crate) const SHERPA_DEBUG_ENV: &str = "MEETILY_SHERPA_ONNX_DEBUG";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SherpaModelFamily {
@@ -85,11 +87,53 @@ pub(crate) fn create_offline_recognizer(
         );
     }
 
+    let num_threads = configured_num_threads(base_config.model_config.num_threads);
+    log::info!(
+        "Configuring {} sherpa-onnx recognizer with {} inference thread{}",
+        family.display_name(),
+        num_threads,
+        if num_threads == 1 { "" } else { "s" }
+    );
     create_with_fallback(family, selection.requested, |provider| {
         let mut config = base_config.clone();
         config.model_config.provider = Some(provider.as_str().to_string());
+        config.model_config.num_threads = num_threads;
+        config.model_config.debug = env_flag(SHERPA_DEBUG_ENV);
         OfflineRecognizer::create(&config)
     })
+}
+
+fn configured_num_threads(default: i32) -> i32 {
+    let value = std::env::var(SHERPA_THREADS_OVERRIDE_ENV).ok();
+    parse_num_threads(value.as_deref(), default)
+}
+
+fn parse_num_threads(value: Option<&str>, default: i32) -> i32 {
+    let Some(value) = value else {
+        return default;
+    };
+    match value.trim().parse::<i32>() {
+        Ok(threads) if (1..=8).contains(&threads) => threads,
+        _ => {
+            log::warn!(
+                "Ignoring {}='{}'; expected an integer from 1 to 8",
+                SHERPA_THREADS_OVERRIDE_ENV,
+                value
+            );
+            default
+        }
+    }
+}
+
+fn env_flag(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn current_platform() -> TargetPlatform {
@@ -124,7 +168,9 @@ fn select_provider(
         };
     }
 
-    match SherpaProvider::parse(value).filter(|provider| family.supports(*provider)) {
+    match SherpaProvider::parse(value).filter(|provider| {
+        family.supports(*provider) && provider_is_available(*provider, platform, sherpa_cuda_native)
+    }) {
         Some(provider) => ProviderSelection {
             requested: provider,
             ignored_override: None,
@@ -136,8 +182,20 @@ fn select_provider(
     }
 }
 
+fn provider_is_available(
+    provider: SherpaProvider,
+    platform: TargetPlatform,
+    sherpa_cuda_native: bool,
+) -> bool {
+    match provider {
+        SherpaProvider::Cpu => true,
+        SherpaProvider::CoreMl => platform == TargetPlatform::MacOs,
+        SherpaProvider::Cuda => platform != TargetPlatform::MacOs && sherpa_cuda_native,
+    }
+}
+
 fn default_provider(
-    family: SherpaModelFamily,
+    _family: SherpaModelFamily,
     platform: TargetPlatform,
     sherpa_cuda_native: bool,
 ) -> SherpaProvider {
@@ -145,10 +203,7 @@ fn default_provider(
         return SherpaProvider::Cuda;
     }
 
-    match (family, platform) {
-        (SherpaModelFamily::SenseVoice, TargetPlatform::MacOs) => SherpaProvider::CoreMl,
-        _ => SherpaProvider::Cpu,
-    }
+    SherpaProvider::Cpu
 }
 
 fn create_with_fallback<T, F>(
@@ -208,7 +263,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sense_voice_prefers_coreml_on_macos() {
+    fn sense_voice_auto_uses_the_benchmarked_cpu_path_on_macos() {
         let selection = select_provider(
             SherpaModelFamily::SenseVoice,
             TargetPlatform::MacOs,
@@ -216,7 +271,7 @@ mod tests {
             None,
         );
 
-        assert_eq!(selection.requested, SherpaProvider::CoreMl);
+        assert_eq!(selection.requested, SherpaProvider::Cpu);
     }
 
     #[test]
@@ -262,6 +317,15 @@ mod tests {
         assert_eq!(sense_voice.requested, SherpaProvider::Cpu);
         assert_eq!(sense_voice.ignored_override, None);
 
+        let sense_voice_coreml = select_provider(
+            SherpaModelFamily::SenseVoice,
+            TargetPlatform::MacOs,
+            false,
+            Some("coreml"),
+        );
+        assert_eq!(sense_voice_coreml.requested, SherpaProvider::CoreMl);
+        assert_eq!(sense_voice_coreml.ignored_override, None);
+
         let qwen = select_provider(
             SherpaModelFamily::Qwen3Asr,
             TargetPlatform::MacOs,
@@ -270,6 +334,24 @@ mod tests {
         );
         assert_eq!(qwen.requested, SherpaProvider::Cpu);
         assert_eq!(qwen.ignored_override.as_deref(), Some("coreml"));
+
+        let unavailable_cuda = select_provider(
+            SherpaModelFamily::SenseVoice,
+            TargetPlatform::Other,
+            false,
+            Some("cuda"),
+        );
+        assert_eq!(unavailable_cuda.requested, SherpaProvider::Cpu);
+        assert_eq!(unavailable_cuda.ignored_override.as_deref(), Some("cuda"));
+
+        let packaged_cuda = select_provider(
+            SherpaModelFamily::SenseVoice,
+            TargetPlatform::Other,
+            true,
+            Some("cuda"),
+        );
+        assert_eq!(packaged_cuda.requested, SherpaProvider::Cuda);
+        assert_eq!(packaged_cuda.ignored_override, None);
     }
 
     #[test]
@@ -304,5 +386,13 @@ mod tests {
 
         assert_eq!(result, "recognizer");
         assert_eq!(attempts, vec![SherpaProvider::CoreMl]);
+    }
+
+    #[test]
+    fn thread_override_is_bounded() {
+        assert_eq!(parse_num_threads(Some("2"), 3), 2);
+        assert_eq!(parse_num_threads(Some("12"), 3), 3);
+        assert_eq!(parse_num_threads(Some("invalid"), 3), 3);
+        assert_eq!(parse_num_threads(None, 3), 3);
     }
 }

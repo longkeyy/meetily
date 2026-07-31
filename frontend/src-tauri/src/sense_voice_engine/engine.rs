@@ -299,7 +299,7 @@ fn create_recognizer(model_dir: &Path) -> Result<OfflineRecognizer> {
         use_itn: true,
     };
     config.model_config.tokens = Some(path_string(model_dir.join("tokens.txt"))?);
-    config.model_config.num_threads = 3;
+    config.model_config.num_threads = 2;
     config.decoding_method = Some("greedy_search".to_string());
     create_offline_recognizer(SherpaModelFamily::SenseVoice, &config)
 }
