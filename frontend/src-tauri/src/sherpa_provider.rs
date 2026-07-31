@@ -18,20 +18,12 @@ impl SherpaModelFamily {
             Self::Qwen3Asr => "Qwen3-ASR",
         }
     }
-
-    fn supports(self, provider: SherpaProvider) -> bool {
-        match self {
-            Self::SenseVoice => true,
-            Self::Qwen3Asr => provider != SherpaProvider::CoreMl,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SherpaProvider {
     Cpu,
     Cuda,
-    CoreMl,
 }
 
 impl SherpaProvider {
@@ -39,7 +31,6 @@ impl SherpaProvider {
         match value.trim().to_ascii_lowercase().as_str() {
             "cpu" => Some(Self::Cpu),
             "cuda" => Some(Self::Cuda),
-            "coreml" => Some(Self::CoreMl),
             _ => None,
         }
     }
@@ -48,7 +39,6 @@ impl SherpaProvider {
         match self {
             Self::Cpu => "cpu",
             Self::Cuda => "cuda",
-            Self::CoreMl => "coreml",
         }
     }
 }
@@ -71,7 +61,6 @@ pub(crate) fn create_offline_recognizer(
 ) -> Result<OfflineRecognizer> {
     let override_value = std::env::var(SHERPA_PROVIDER_OVERRIDE_ENV).ok();
     let selection = select_provider(
-        family,
         current_platform(),
         cfg!(feature = "sherpa-cuda"),
         override_value.as_deref(),
@@ -145,12 +134,11 @@ fn current_platform() -> TargetPlatform {
 }
 
 fn select_provider(
-    family: SherpaModelFamily,
     platform: TargetPlatform,
     sherpa_cuda_native: bool,
     override_value: Option<&str>,
 ) -> ProviderSelection {
-    let default = default_provider(family, platform, sherpa_cuda_native);
+    let default = default_provider(platform, sherpa_cuda_native);
     let Some(value) = override_value
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -168,9 +156,9 @@ fn select_provider(
         };
     }
 
-    match SherpaProvider::parse(value).filter(|provider| {
-        family.supports(*provider) && provider_is_available(*provider, platform, sherpa_cuda_native)
-    }) {
+    match SherpaProvider::parse(value)
+        .filter(|provider| provider_is_available(*provider, platform, sherpa_cuda_native))
+    {
         Some(provider) => ProviderSelection {
             requested: provider,
             ignored_override: None,
@@ -189,20 +177,17 @@ fn provider_is_available(
 ) -> bool {
     match provider {
         SherpaProvider::Cpu => true,
-        SherpaProvider::CoreMl => platform == TargetPlatform::MacOs,
         SherpaProvider::Cuda => platform != TargetPlatform::MacOs && sherpa_cuda_native,
     }
 }
 
-fn default_provider(
-    _family: SherpaModelFamily,
-    platform: TargetPlatform,
-    sherpa_cuda_native: bool,
-) -> SherpaProvider {
+fn default_provider(platform: TargetPlatform, sherpa_cuda_native: bool) -> SherpaProvider {
     if platform != TargetPlatform::MacOs && sherpa_cuda_native {
         return SherpaProvider::Cuda;
     }
 
+    // Apple Silicon SenseVoice uses its dedicated native CoreML pipeline.
+    // sherpa-onnx only selects providers backed by a packaged runtime here.
     SherpaProvider::Cpu
 }
 
@@ -264,92 +249,53 @@ mod tests {
 
     #[test]
     fn sense_voice_auto_uses_the_benchmarked_cpu_path_on_macos() {
-        let selection = select_provider(
-            SherpaModelFamily::SenseVoice,
-            TargetPlatform::MacOs,
-            false,
-            None,
-        );
+        let selection = select_provider(TargetPlatform::MacOs, false, None);
 
         assert_eq!(selection.requested, SherpaProvider::Cpu);
     }
 
     #[test]
     fn qwen_stays_on_cpu_on_macos() {
-        let selection = select_provider(
-            SherpaModelFamily::Qwen3Asr,
-            TargetPlatform::MacOs,
-            false,
-            None,
-        );
+        let selection = select_provider(TargetPlatform::MacOs, false, None);
 
         assert_eq!(selection.requested, SherpaProvider::Cpu);
     }
 
     #[test]
     fn generic_native_build_does_not_enable_sherpa_cuda() {
-        let selection = select_provider(
-            SherpaModelFamily::SenseVoice,
-            TargetPlatform::Other,
-            false,
-            None,
-        );
+        let selection = select_provider(TargetPlatform::Other, false, None);
 
         assert_eq!(selection.requested, SherpaProvider::Cpu);
     }
 
     #[test]
     fn dedicated_native_cuda_build_enables_cuda_off_macos() {
-        for family in [SherpaModelFamily::SenseVoice, SherpaModelFamily::Qwen3Asr] {
-            let selection = select_provider(family, TargetPlatform::Other, true, None);
-            assert_eq!(selection.requested, SherpaProvider::Cuda);
-        }
+        let selection = select_provider(TargetPlatform::Other, true, None);
+        assert_eq!(selection.requested, SherpaProvider::Cuda);
     }
 
     #[test]
-    fn diagnostic_override_respects_model_provider_support() {
-        let sense_voice = select_provider(
-            SherpaModelFamily::SenseVoice,
-            TargetPlatform::MacOs,
-            false,
-            Some("cpu"),
-        );
+    fn diagnostic_override_respects_packaged_provider_support() {
+        let sense_voice = select_provider(TargetPlatform::MacOs, false, Some("cpu"));
         assert_eq!(sense_voice.requested, SherpaProvider::Cpu);
         assert_eq!(sense_voice.ignored_override, None);
 
-        let sense_voice_coreml = select_provider(
-            SherpaModelFamily::SenseVoice,
-            TargetPlatform::MacOs,
-            false,
-            Some("coreml"),
+        let sense_voice_coreml = select_provider(TargetPlatform::MacOs, false, Some("coreml"));
+        assert_eq!(sense_voice_coreml.requested, SherpaProvider::Cpu);
+        assert_eq!(
+            sense_voice_coreml.ignored_override.as_deref(),
+            Some("coreml")
         );
-        assert_eq!(sense_voice_coreml.requested, SherpaProvider::CoreMl);
-        assert_eq!(sense_voice_coreml.ignored_override, None);
 
-        let qwen = select_provider(
-            SherpaModelFamily::Qwen3Asr,
-            TargetPlatform::MacOs,
-            false,
-            Some("coreml"),
-        );
+        let qwen = select_provider(TargetPlatform::MacOs, false, Some("coreml"));
         assert_eq!(qwen.requested, SherpaProvider::Cpu);
         assert_eq!(qwen.ignored_override.as_deref(), Some("coreml"));
 
-        let unavailable_cuda = select_provider(
-            SherpaModelFamily::SenseVoice,
-            TargetPlatform::Other,
-            false,
-            Some("cuda"),
-        );
+        let unavailable_cuda = select_provider(TargetPlatform::Other, false, Some("cuda"));
         assert_eq!(unavailable_cuda.requested, SherpaProvider::Cpu);
         assert_eq!(unavailable_cuda.ignored_override.as_deref(), Some("cuda"));
 
-        let packaged_cuda = select_provider(
-            SherpaModelFamily::SenseVoice,
-            TargetPlatform::Other,
-            true,
-            Some("cuda"),
-        );
+        let packaged_cuda = select_provider(TargetPlatform::Other, true, Some("cuda"));
         assert_eq!(packaged_cuda.requested, SherpaProvider::Cuda);
         assert_eq!(packaged_cuda.ignored_override, None);
     }
@@ -359,7 +305,7 @@ mod tests {
         let mut attempts = Vec::new();
         let result = create_with_fallback(
             SherpaModelFamily::SenseVoice,
-            SherpaProvider::CoreMl,
+            SherpaProvider::Cuda,
             |provider| {
                 attempts.push(provider);
                 (provider == SherpaProvider::Cpu).then_some("recognizer")
@@ -368,7 +314,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(result, "recognizer");
-        assert_eq!(attempts, vec![SherpaProvider::CoreMl, SherpaProvider::Cpu]);
+        assert_eq!(attempts, vec![SherpaProvider::Cuda, SherpaProvider::Cpu]);
     }
 
     #[test]
@@ -376,7 +322,7 @@ mod tests {
         let mut attempts = Vec::new();
         let result = create_with_fallback(
             SherpaModelFamily::SenseVoice,
-            SherpaProvider::CoreMl,
+            SherpaProvider::Cuda,
             |provider| {
                 attempts.push(provider);
                 Some("recognizer")
@@ -385,7 +331,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(result, "recognizer");
-        assert_eq!(attempts, vec![SherpaProvider::CoreMl]);
+        assert_eq!(attempts, vec![SherpaProvider::Cuda]);
     }
 
     #[test]

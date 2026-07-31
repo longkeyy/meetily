@@ -140,10 +140,6 @@
             "binaries/ffmpeg"
         ],
         "macOS": {
-            "frameworks": [
-                "binaries/sherpa-macos/libsherpa-onnx-c-api.dylib",
-                "binaries/sherpa-macos/libonnxruntime.1.27.0.dylib"
-            ],
             "entitlements": "entitlements.plist",
             "signingIdentity": "-",
             "hardenedRuntime": true,
